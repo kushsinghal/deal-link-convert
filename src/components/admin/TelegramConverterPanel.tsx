@@ -50,7 +50,7 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
       <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
         <li>Create a bot with @BotFather and paste its token below.</li>
         <li>Connect the bot using your live site address.</li>
-        <li>In each group or channel, send the connection command shown after connecting.</li>
+        <li>In your chat with the bot (or a group where it is added), send <b>/Radhe</b>. The bot replies "Connected" — no code or website visit needed.</li>
       </ol>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2"><Label htmlFor="converter-token">Bot token {saved ? "· saved" : ""}</Label>
@@ -63,9 +63,9 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
         <Button variant="outline" disabled={busy || !saved} onClick={() => run("status")}><RefreshCw className="mr-2 h-4 w-4" />Check connection</Button>
         <Button variant="ghost" disabled={busy || !saved} onClick={() => run("disconnect")}><Unplug className="mr-2 h-4 w-4" />Disconnect</Button>
       </div>
-      <p className="text-xs text-slate-500">Disconnect stops Telegram from sending messages to this site. Your bot token and connected chats are kept, so you can reconnect at any time.</p>
+      <p className="text-xs text-slate-500">The connection does not expire. It is checked every 15 minutes and restored automatically if Telegram loses it; your bot sends you "Disconnected" or "restored" messages, and an alert if your ExtraPe key stops working. Disconnect stops conversion until you connect again.</p>
       {status?.pairing_code && <div className="space-y-2 text-sm">
-        <Label>Chat connection command · expires in 15 minutes</Label>
+        <Label>Or use this one-time command (expires in 15 minutes)</Label>
         <Input readOnly aria-label="Telegram connection command" value={`/connect ${status.pairing_code}`} className="font-mono text-xs" />
       </div>}
       {status?.chats && <p className="text-sm text-slate-600">Connected chats: {status.chats.length ? status.chats.map((c: any) => `${c.type} ${c.chat_id}`).join(", ") : "None"}</p>}

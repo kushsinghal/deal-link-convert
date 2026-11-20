@@ -37,6 +37,7 @@ function AdminGate() {
 
   const signOut = () => {
     localStorage.removeItem(TOKEN_KEY);
+    window.dispatchEvent(new Event("dealloot-auth"));
     setToken(null);
   };
 
@@ -62,6 +63,7 @@ function SignIn({ onDone }: { onDone: (t: string) => void }) {
     try {
       const { data } = await api.post<{ token: string }>("/auth/login", { password });
       localStorage.setItem(TOKEN_KEY, data.token);
+      window.dispatchEvent(new Event("dealloot-auth"));
       onDone(data.token);
     } catch (err) {
       toast.error(errMsg(err));

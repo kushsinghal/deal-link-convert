@@ -58,7 +58,7 @@ export const PriceHistoryDialog = ({ deal, open, onOpenChange }) => {
       <DialogContent data-testid="price-history-dialog" className="max-h-[92vh] max-w-3xl overflow-y-auto border-slate-200 bg-white text-slate-900">
         <DialogHeader>
           <DialogTitle className="pr-6 text-base leading-snug">{deal.title}</DialogTitle>
-          <DialogDescription className="text-xs text-slate-500">Full store price history (from pricehistory.app) plus prices seen in deal channels</DialogDescription>
+          <DialogDescription className="text-xs text-slate-500">Store price history plus prices observed on DealLoot</DialogDescription>
         </DialogHeader>
         {!data ? <p data-testid="price-history-loading" className="py-10 text-center font-mono text-sm text-slate-500">Loading price history…</p> : (
           <>

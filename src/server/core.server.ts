@@ -60,6 +60,7 @@ async function safeConvert(url: string, settings: any) {
     return await engine.convertLink(url, settings);
   } catch (e) {
     console.warn("Link conversion failed", e?.message);
+    void import("./telegram-converter.server").then((t) => t.alertIfExtraPeKeyFailed(String(e?.message || ""))).catch(() => {});
     return url;
   }
 }
@@ -224,6 +225,7 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
     }
   }
   deal.clean_url = await engine.cleanLink(deal.url);
+  if (/^https?:\/\/([^/]*\.)?(whatsapp\.com|nitter\.[^/]+|x\.com|twitter\.com|instagram\.com|youtube\.com|youtu\.be|t\.me|telegram\.me)(\/|$)/i.test(deal.clean_url)) return null;
   deal.offers = engine.markBestCard(engine.extractOffers(`${deal.text || ""}\n${deal.note || ""}`), deal.price);
   if (deal.store === "Other") deal.store = engine.detectStore(deal.clean_url, deal.text || "");
   deal.title_key = titleKey(deal.title);
@@ -467,8 +469,8 @@ export async function priceHistory(id: string) {
       highest: ph.max, average: ph.avg, points: ph.history, source_page: ph.page_url });
   });
   const seen = pts.filter((p) => p.price).map((p) => ({ x: p.at, y: Number(p.price) }));
-  if (seen.length) stores.push({ store: "Seen in deal channels", url: deal.affiliate_url, current: deal.price, lowest: Math.min(...seen.map((p) => p.y)), highest: Math.max(...seen.map((p) => p.y)), points: seen });
-  const priced = stores.filter((s) => s.current && s.store !== "Seen in deal channels");
+  if (seen.length) stores.push({ store: "Seen on DealLoot", url: deal.affiliate_url, current: deal.price, lowest: Math.min(...seen.map((p) => p.y)), highest: Math.max(...seen.map((p) => p.y)), points: seen });
+  const priced = stores.filter((s) => s.current && s.store !== "Seen on DealLoot");
   let best = priced.length ? priced.reduce((a, b) => (b.current < a.current ? b : a)) : null;
   best = best ? { store: best.store, current: best.current, url: best.url } : null;
   if (deal.price && (!best || deal.price < best.current)) best = { store: deal.store, current: deal.price, url: deal.affiliate_url || deal.clean_url };

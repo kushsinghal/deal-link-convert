@@ -8,6 +8,7 @@ import { SankmoTab } from "@/components/admin/SankmoTab";
 import { LogsTab } from "@/components/admin/LogsTab";
 import { DealsTab } from "@/components/admin/DealsTab";
 import { BulkConvertTab } from "@/components/admin/BulkConvertTab";
+import { ConverterHistoryTab } from "@/components/admin/ConverterHistoryTab";
 
 const TABS = [
   ["bulk", "Convert Links", BulkConvertTab],
@@ -18,6 +19,7 @@ const TABS = [
   ["manual-add", "Add Deal", ManualAddTab],
   ["sankmo", "Affiliate Setup", SankmoTab],
   ["logs", "Post Log", LogsTab],
+  ["converter-history", "Converter History", ConverterHistoryTab],
 ];
 
 export default function AdminPage() {

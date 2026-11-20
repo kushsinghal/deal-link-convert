@@ -62,6 +62,7 @@ export async function handle(request: Request, splat: string) {
       // Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
       const { verifyCronRequest } = await import("./auth.server");
       if (!verifyCronRequest(request)) return json({ detail: "Unauthorized" }, 401);
+      void import("./telegram-converter.server").then((t) => t.checkConverterHealth()).catch((e) => console.error("converter health check failed", e?.message));
       return json(await core.startFetchAll(publicOrigin(url), { wait: false }), 202);
     }
     if (method === "POST" && a === "cron" && b === "fetch") {
@@ -95,6 +96,7 @@ export async function handle(request: Request, splat: string) {
       if (a === "destinations") return json(await core.listDestinations());
       if (a === "settings") return json(await core.readSettings());
       if (a === "logs") return json(await core.logs(Number(qp("limit") || 200)));
+      if (a === "converter-logs") return json(await (await import("./telegram-converter.server")).converterLogs(Number(qp("limit") || 200)));
     }
     if (method === "POST") {
       if (a === "sources" && b === "test-all") return json(await (await import("./source-health.server")).testAllSources());

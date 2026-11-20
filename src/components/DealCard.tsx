@@ -1,11 +1,11 @@
 // @ts-nocheck — ported from the original app
 import { useEffect, useState } from "react";
-import { ExternalLink, Copy, Star, LineChart, TrendingDown, Link2, Share2 } from "lucide-react";
+import { ExternalLink, Copy, Star, LineChart, TrendingDown, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, CATS, inr, timeAgo, getToken } from "@/lib/api";
 import { PriceHistoryDialog } from "@/components/PriceHistoryDialog";
 import { OriginalPostDialog } from "@/components/OriginalPostDialog";
-import { copyDeal, shareDeal, previewUrl } from "@/lib/share";
+import { copyDeal, previewUrl } from "@/lib/share";
 import { OffersBox } from "@/components/OffersBox";
 
 const Thumb = ({ deal }) =>
@@ -80,7 +80,7 @@ export const DealCard = ({ deal, index = 0, onChange }) => {
         <OffersBox deal={deal} />
         {deal.editorial_note && <p data-testid={`deal-editorial-${deal.id}`} className="whitespace-pre-line break-words text-sm leading-6 text-slate-700">{deal.editorial_note}</p>}
         <p data-testid={`deal-posted-${deal.id}`} className="font-mono text-[11px] text-slate-500">
-          {deal.source} · posted {timeAgo(deal.posted_at || deal.created_at)}
+          {admin ? `${deal.source} · ` : ""}posted {timeAgo(deal.posted_at || deal.created_at)}
         </p>
         <p data-testid={`deal-disclosure-${deal.id}`} className="text-[11px] leading-5 text-slate-600">{deal.converted ? "Affiliate link · We may earn a commission." : "Retailer link · Not converted."} Price observed {timeAgo(deal.reviewed_at || deal.posted_at)}; check the retailer for today's price and conditions.</p>
         <div className="mt-auto flex gap-1.5 pt-1">
@@ -94,16 +94,11 @@ export const DealCard = ({ deal, index = 0, onChange }) => {
           <button onClick={() => copyDeal(shareData)} data-testid={`copy-deal-link-button-${deal.id}`} aria-label="Copy deal details" title="Copy name, MRP, deal price + link" className={`${iconBtn} text-slate-700`}>
             <Copy className="h-4 w-4" />
           </button>
-          <button onClick={() => shareDeal(shareData)} data-testid={`share-deal-button-${deal.id}`} aria-label="Share deal" title="Share to any app" className={`${iconBtn} text-[#FF5A1F]`}>
-            <Share2 className="h-4 w-4" />
-          </button>
-          {deal.source_post_url ? (
-            <button onClick={() => setPost(true)} data-testid={`original-post-button-${deal.id}`} aria-label="Original post" title="See the original post"
+          {admin && deal.source_post_url && (
+            <button onClick={() => setPost(true)} data-testid={`original-post-button-${deal.id}`} aria-label="Original post" title="See the original post (admin only)"
               className={`${iconBtn} text-[#229ED9]`}>
               <Link2 className="h-4 w-4" />
             </button>
-          ) : (
-            <span className={`${iconBtn} cursor-not-allowed text-slate-300`} title="Added by hand — no original post"><Link2 className="h-4 w-4" /></span>
           )}
         </div>
       </div>

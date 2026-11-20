@@ -7,6 +7,8 @@ const state = vi.hoisted(() => ({ paired: false, done: false, sends: [] as any[]
 vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: string) => ({
   findOne: async () => name === "telegram_converter_chats" ? state.paired ? {} : null : state.done ? { done: true } : null,
   insertOne: async () => ({}),
+  insertMany: async () => ({}),
+  find: () => ({ toArray: async () => [] }),
   updateOne: async (_filter: any, patch: any) => { if (patch.$set?.done) state.done = true; return { modifiedCount: 1 }; },
 }) }), db: { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: "main", telegram_converter_token: "123456:" + "a".repeat(30), sankmo_token: "configured", earnkaro_token: "configured" }, error: null }) }) }) }) } }));
 
@@ -82,6 +84,17 @@ describe("Telegram affiliate conversion", () => {
     expect(good.status).toBe(200);
     expect(fetch).not.toHaveBeenCalled();
   });
+  it("connects a chat with the /Radhe command without a code", async () => {
+    vi.stubEnv("SESSION_SECRET", "test-session-signing-secret-for-telegram");
+    mockProviders();
+    const request = new Request("https://app.test", { headers: { "x-telegram-bot-api-secret-token": webhookSecret(token) } });
+    for (const text of ["/Radhe", "@radhe"]) {
+      state.sends = [];
+      expect((await receiveConverter(request, { update_id: 9, message: { message_id: 2, chat: { id: 3, type: "private" }, text } })).status).toBe(200);
+      expect(state.sends[0].body.text).toContain("Connected");
+    }
+  });
+
   it("replies to paired direct chats and deduplicates Telegram retries", async () => {
     vi.stubEnv("SESSION_SECRET", "test-session-signing-secret-for-telegram");
     mockProviders(); state.paired = true;
