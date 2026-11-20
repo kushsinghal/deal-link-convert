@@ -73,3 +73,10 @@
 - Replace unavailable third-party feeds only with authorised, verified alternative source URLs; don't bypass anti-bot restrictions.
 - Optional scheduled draft import using host-supported scheduler; not an in-app interval loop.
 - Suggestion: add original comparison articles with own photos and transparent pros/cons to improve visitor trust and application substance.
+## 2026-11-20 (fork 2)
+- Preview verified loading; vite `allowedHosts: true` so any preview host works.
+- Added 7 original buying guides (10 total); 01–10 numbering fixed on home and /guides; removed lone guide image.
+- Added Amazon Associate statement to footer and /info/disclosure (AMAZON_DISCLOSURE in src/lib/editorial.ts).
+- Added user's 4 sources to preview DB. nitter RSS + @wealthydimes OK; @hotdealsbywd and @tapworthy have Telegram web preview disabled by owner (clear error message added).
+- Testing agent iteration_2: 22/22 backend, frontend 100%.
+- Amazon application still needs: live public domain (not preview URL), real published reviewed deals, own Associates tag for Amazon links (ExtraPe Amazon needs approval), 3 qualifying sales in 180 days.

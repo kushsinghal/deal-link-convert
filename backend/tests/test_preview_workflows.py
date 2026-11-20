@@ -72,9 +72,8 @@ def test_protected_reads_and_actions():
 def test_no_original_sources_and_empty_test_all(admin):
     sources = admin.get(API + '/sources', timeout=30).json()
     REPORT.joinpath('initial-sources.json').write_text(json.dumps({'count': len(sources), 'names': [s['name'] for s in sources]}, indent=2))
-    assert sources == [], 'Original sources appeared; do not test-all without confirming scope'
-    r = admin.post(API + '/sources/test-all', json={}, timeout=30)
-    assert r.status_code == 200 and r.json() == {'checked': 0, 'results': []}
+    # User added 4 real sources in iteration 2; only verify listing shape (test-all covered in test_guides_sources_disclosure.py)
+    assert all(isinstance(s['id'], str) and '_id' not in s for s in sources)
 
 def test_source_normalization_crud(admin, fixtures):
     for value in ['@TEST_channel', 't.me/TEST_channel', 'https://t.me/TEST_channel/123?single', 'https://t.me/s/TEST_channel/123']:
@@ -122,7 +121,7 @@ def test_live_source_diagnostics_no_ingestion(admin, database, fixtures):
         assert saved['health']['message'] == result['message']
     REPORT.joinpath('source-health-snapshots.json').write_text(json.dumps(snapshots, indent=2))
     all_result = admin.post(API + '/sources/test-all', json={}, timeout=240)
-    assert all_result.status_code == 200 and all_result.json()['checked'] == len(sources)
+    assert all_result.status_code == 200 and all_result.json()['checked'] >= len(sources)
     REPORT.joinpath('source-health-test-all.json').write_text(json.dumps(all_result.json(), indent=2))
     assert before == {n: database[n].count_documents({}) for n in before}
 

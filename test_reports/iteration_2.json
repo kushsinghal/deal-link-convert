@@ -1,0 +1,29 @@
+{
+  "summary": "Tested the preview URL on desktop (1920x1080) and mobile (390x844), the 10 guides, the Amazon Associate statement in the footer and on the disclosure page, and admin Sources (Test all, refresh, add and delete). New pytest file: 22/22 passed. Browser: home loads fully with 0 console errors and 0px horizontal overflow on desktop and mobile. Home numbers the guides 01..10. /guides lists 10 guides and a guide page opens with content. Footer text matches exactly on every page. Admin login with the password works. Sources tab lists the 4 user sources. In Test all, nitter RSS (21 posts) and @wealthydimes (18 posts) are Readable. @hotdealsbywd and @tapworthy show 'owner has turned off Telegram's public web preview'. A TEST_ source's refresh showed an import error and its delete worked. The 4 user sources were kept. No deals were created.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/guides index", "issues": ["Only guide 01 has an image. Cards 02 and 03 in the first row leave a large empty gap under them. Add images to all guides or remove the image from the first card."]},
+      {"screen": "Admin Sources", "issues": ["The nitter RSS source shows as 'nitter.mie.foundation'. A name like '@Starcommander10 (X via nitter)' would be clearer."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_guides_sources_disclosure.py", "/app/backend/tests/test_preview_workflows.py", "/app/test_reports/pytest/iteration_2.xml"],
+  "action_items": [
+    "Optional: turn off or replace @hotdealsbywd and @tapworthy. They are enabled, so every scheduled Import drafts run will log the same 'public web preview' error.",
+    "Optional: give the nitter source a clear name. The public nitter instance may go down at any time, so keep a backup source.",
+    "Optional: make the /guides card layout even (all with images or none)."
+  ],
+  "critical_code_review_comments": [
+    "fetchTelegram: telling 'preview disabled' (.tgme_page_extra) apart from a nonexistent channel works on live data. It relies on Telegram's HTML class names, which may change.",
+    "engine.server.ts (~833 lines) is still over the maintainability threshold."
+  ],
+  "updated_files": ["/app/backend/tests/test_guides_sources_disclosure.py", "/app/backend/tests/test_preview_workflows.py (2 outdated assertions updated: no longer assumes zero sources, and test-all checked count changed to >=)"],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "100%"},
+  "test_credentials": "/app/memory/test_credentials.md: /admin password preview123 (password only)",
+  "seed_data_creation": "None kept. Created TEST_tmp_src_91x (API) and TEST_ui_tmp_src_77 (UI), both deleted by id. No deals created. The 4 user sources were not changed except for their health fields, which Test all updates.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "There are now 4 real user sources (tapworthy, hotdealsbywd, wealthydimes, nitter Starcommander10 RSS). Do not delete them. Do not use 'Import drafts' or refresh on real sources unless asked; it creates private draft deals. Amazon compliance text comes from AMAZON_DISCLOSURE in src/lib/editorial.ts."
+}
