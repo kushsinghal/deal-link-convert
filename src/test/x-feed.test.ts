@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backupUrls, mapTweets, nitterUser, xUsername } from "../server/x-feed.server";
+import { backupUrls, mapScraped, mapTweets, nitterUser, xUsername } from "../server/x-feed.server";
 
 describe("feed backups", () => {
   it("builds 5 nitter mirror backups after custom feeds", () => {
@@ -20,5 +20,10 @@ describe("feed backups", () => {
     }, "deals");
     expect(items[0]).toMatchObject({ ext_id: "123", links: ["https://www.flipkart.com/boat/p/itm1"], image: "https://pbs.twimg.com/a.jpg", post_url: "https://x.com/deals/status/123" });
     expect(items[0].text).toBe("Boat headset ₹999 https://www.flipkart.com/boat/p/itm1");
+  });
+  it("maps cookie-read posts and drops t.co and x.com links", () => {
+    const [item] = mapScraped([{ id: "9", text: "Loot ₹199 https://t.co/abc", urls: ["https://www.flipkart.com/x/p/itm9", "https://x.com/a/status/1"], photos: [{ url: "https://pbs.twimg.com/b.jpg" }], timeParsed: new Date("2026-06-01T00:00:00Z") }], "deals");
+    expect(item).toMatchObject({ ext_id: "9", links: ["https://www.flipkart.com/x/p/itm9"], image: "https://pbs.twimg.com/b.jpg", posted_at: "2026-06-01T00:00:00.000Z" });
+    expect(item.text).toBe("Loot ₹199\nhttps://www.flipkart.com/x/p/itm9");
   });
 });

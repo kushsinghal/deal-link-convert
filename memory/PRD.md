@@ -118,3 +118,4 @@
 - Feed backups: `src/server/x-feed.server.ts` — main → up to 5 custom backup RSS → 5 auto Nitter mirrors → X API (X_BEARER_TOKEN, max once/30 min per account, since_id). New source kind "x". Source fields backup_urls, x_username, last_via. `/x/test` endpoint + UI.
 - Sankmo token API returns "Invalid Token!" (token API not usable). X_BEARER_TOKEN saved is a 40-char value → X returns 401; needs the app Bearer Token (~110 chars, starts with AAAA).
 - Backlog: admin Telegram alert when converter keys expire (P1); social-link ingest filter (P2); converter-logs NaN limit (P2).
+- 2026-11-20: X backup switched to spare-account login cookies (X_AUTH_TOKEN + X_CT0) via @the-convocation/twitter-scraper; official X_BEARER_TOKEN only used if it starts with "AAAA" (the saved X_BEARER_TOKEN is the user's main-account cookie and is ignored). Throttled reads return [] (no error). Verified: 5–7 live posts read in ~1s.

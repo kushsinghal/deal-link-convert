@@ -59,13 +59,55 @@ export function mapTweets(data: any, username: string) {
   });
 }
 
-/** Reads recent posts of an X account; at most once per 30 minutes per account to protect API credits. */
+const env = (k: string) => (process.env[k] || "").trim();
+const hasOfficialToken = () => env("X_BEARER_TOKEN").startsWith("AAAA");
+export const xReady = () => !!(env("X_AUTH_TOKEN") && env("X_CT0")) || hasOfficialToken();
+
+export function mapScraped(tweets: any[], username: string) {
+  return tweets.map((t) => {
+    const links = (t.urls || []).filter((u: string) => !/(?:x|twitter)\.com\//i.test(u));
+    let text = String(t.text || "").replace(/https?:\/\/t\.co\/\w+/g, "").trim();
+    for (const u of links) if (!text.includes(u)) text += `\n${u}`;
+    return { ext_id: t.id, text: text.trim(), links, image: t.photos?.[0]?.url || null, posted_at: t.timeParsed ? new Date(t.timeParsed).toISOString() : null, post_url: t.permanentUrl || `https://x.com/${username}/status/${t.id}` };
+  });
+}
+
+let scraper: any = null;
+// Reads with a spare account's login cookies (unofficial; X may lock that account).
+async function fetchXCookie(username: string) {
+  if (!scraper) {
+    const { Scraper } = await import("@the-convocation/twitter-scraper");
+    const s = new Scraper();
+    await s.setCookies([`auth_token=${env("X_AUTH_TOKEN")}; Domain=.x.com; Path=/; Secure; HttpOnly`, `ct0=${env("X_CT0")}; Domain=.x.com; Path=/; Secure`]);
+    scraper = s;
+  }
+  const out: any[] = [];
+  try {
+    for await (const t of scraper.getTweets(username, 10)) {
+      if (!t.isRetweet && !t.isReply) out.push(t);
+      if (out.length >= 10) break;
+    }
+  } catch (e: any) {
+    scraper = null;
+    const msg = String(e?.message || e);
+    throw new Error(/401|403|auth|login/i.test(msg) ? `X cookie login rejected: log in to the spare X account again and update X_AUTH_TOKEN and X_CT0 (${msg.slice(0, 120)})` : `X read failed: ${msg.slice(0, 200)}`);
+  }
+  return mapScraped(out, username);
+}
+
+/** Reads recent posts of an X account; at most once per 30 minutes per account to protect the account and credits. */
 export async function fetchX(username: string, force = false) {
   username = username.replace(/^@/, "");
   if (!/^[A-Za-z0-9_]{1,15}$/.test(username)) throw new Error("X API: invalid username");
   const col = (await mongo()).collection("x_users");
   const state = await col.findOne({ username: username.toLowerCase() });
-  if (!force && state?.last_at && Date.now() - new Date(state.last_at).getTime() < X_MIN_GAP_MS) throw new Error("X API: skipped, last read was under 30 minutes ago (credit protection)");
+  if (!force && state?.last_at && Date.now() - new Date(state.last_at).getTime() < X_MIN_GAP_MS) return [];
+  if (env("X_AUTH_TOKEN") && env("X_CT0")) {
+    const items = await fetchXCookie(username);
+    await col.updateOne({ username: username.toLowerCase() }, { $set: { last_at: new Date().toISOString() } }, { upsert: true });
+    return items;
+  }
+  if (!hasOfficialToken()) throw new Error("X: add the spare account's X_AUTH_TOKEN and X_CT0 cookies first");
   const id = await xUserId(username);
   const q = new URLSearchParams({ max_results: "10", exclude: "retweets,replies", "tweet.fields": "created_at,entities,attachments,note_tweet", expansions: "attachments.media_keys", "media.fields": "url,preview_image_url" });
   if (state?.since_id && !force) q.set("since_id", state.since_id);
@@ -93,7 +135,7 @@ export async function fetchSourceItems(src: any): Promise<{ items: any[]; via: s
       try { return { items: isTwitter ? tweetIds(await engine.fetchRss(url)) : await engine.fetchRss(url), via: url }; } catch (e: any) { errors.push(`${new URL(url).hostname}: ${e?.message || e}`); }
     }
     const user = xUsername(src);
-    if (user && process.env["X_BEARER_TOKEN"]) {
+    if (user && xReady()) {
       try { return { items: await fetchX(user), via: "X API" }; } catch (e: any) { errors.push(String(e?.message || e)); }
     }
   }
