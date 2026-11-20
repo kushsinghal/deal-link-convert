@@ -50,6 +50,18 @@ const RADHE = /^(?:\/radhe(?:@\w+)?|@radhe|radhe(?:\s+radhe)*)$/i;
 const PLAIN_START = /^\/start(?:@\w+)?$/i;
 const EXTRAPE_KEY_ERROR = /ExtraPe access token expired or invalid|Add your ExtraPe access token/i;
 const botId = (token: string) => token.split(":")[0];
+const STATUS = /^\/status(?:@\w+)?$/i;
+
+/** Text for /status: live converter key checks plus each feed's last health check. */
+export async function statusReport(settings: any) {
+  const { testConverterKeys } = await import("./engine.server");
+  const icon: Record<string, string> = { ok: "✅", error: "❌", empty: "⚪", "not set": "➖" };
+  const keys = (await testConverterKeys(settings)).map((k: any) => `${icon[k.status] || "❔"} ${k.name}: ${k.status}${k.error ? ` — ${k.error.slice(0, 120)}` : ""}`);
+  const sources = await (await mongo()).collection("sources").find({ enabled: { $ne: false } }, { projection: { _id: 0, name: 1, health: 1 } }).toArray();
+  const ok = sources.filter((s: any) => s.health?.status === "ok").length;
+  const bad = sources.filter((s: any) => s.health?.status !== "ok").map((s: any) => `${icon[s.health?.status] || "❔"} ${s.name}: ${s.health ? `${s.health.status}${s.health.message ? ` — ${String(s.health.message).slice(0, 80)}` : ""}` : "not tested yet"}`);
+  return [`🔑 Keys (live check)`, ...keys, "", `📡 Feeds: ${ok}/${sources.length} working (last check)`, ...bad.slice(0, 40)].join("\n").slice(0, 4000);
+}
 
 async function connectedChats(token: string) {
   return (await mongo()).collection("telegram_converter_chats").find({ bot: botId(token) }, { projection: { _id: 0, chat_id: 1, type: 1 } }).toArray();
@@ -174,11 +186,12 @@ export async function receiveConverter(request: Request, body: unknown) {
     return Response.json({ ok: true });
   }
   if (PLAIN_START.test(text.trim()) && msg.chat.type !== "channel") {
-    await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "👋 Send /Radhe to connect this chat, then send your links or deal text." }).catch((e) => console.error("start reply failed", e.message));
+    await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "👋 Send /Radhe to connect this chat, then send your links or deal text. Send /status to check keys and feeds." }).catch((e) => console.error("start reply failed", e.message));
     return Response.json({ ok: true });
   }
   // Unknown chats cannot use the owner's paid affiliate credentials.
   if (!await chats.findOne({ _id: chatKey })) return Response.json({ ok: true });
+  if (STATUS.test(text.trim()) && msg.chat.type !== "channel") return Response.json({ method: "sendMessage", chat_id: msg.chat.id, text: await statusReport(settings) });
   const updates = db.collection("telegram_converter_updates");
   const key = `${bot}:${update.update_id}`;
   const existing = await updates.findOne({ _id: key });

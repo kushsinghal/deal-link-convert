@@ -683,6 +683,14 @@ async function convertWithExtraPe(url: string, settings: any) {
   return candidate;
 }
 
+const STATUS_SAMPLE = "https://www.flipkart.com/apple-iphone-15-black-128-gb/p/itm6ac6485515ae4";
+export async function testConverterKeys(settings: any) {
+  return Promise.all(Object.values(CONVERTERS).map(async ([name, fn, configured]) => {
+    if (!configured(settings)) return { name, status: "not set" };
+    try { await fn(STATUS_SAMPLE, settings); return { name, status: "ok" }; } catch (e) { return { name, status: "error", error: e?.message || "failed" }; }
+  }));
+}
+
 export async function convertLink(url: string, settings: any) {
   if (settings.convert_enabled === false || isDealSite(url)) return url;
   const store = detectStore(url);

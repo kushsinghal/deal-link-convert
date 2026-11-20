@@ -129,3 +129,6 @@
 ## Backlog
 - P0: add user's sources; connect purchased custom domain (dealloot.in) after deploy.
 - P1: Telegram destinations; scheduled scan cron.
+- Emergent deploy FAILED: platform runtime cannot run the Node SSR server (RCA in /app/deployer-agent-docs). Options offered: Render free (recommended, render.yaml ready) vs rewrite to Python. Awaiting user choice.
+- Added user's 38 sources (25 Telegram, 10 RSS, 3 web) to preview DB; test-all: 35 ok, desidime web x2 HTTP403, dealsmagnet web page empty.
+- Added Telegram /status command (statusReport in telegram-converter.server.ts, testConverterKeys in engine.server.ts): live key check + feed health. Verified via SSR module run. ExtraPe expiry alert already existed (KEY_ALERTS); both need converter bot token set in Control Room (not set yet).
