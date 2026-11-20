@@ -30,7 +30,7 @@ const BULK_MAX = 10;
 const SPLIT_MAX = 10;
 
 const DEFAULT_SETTINGS = {
-  auto_post: true, supercoin_enabled: true, gold_enabled: true, giftcard_enabled: true, giftcard_min: 5,
+  auto_post: true, auto_publish: true, supercoin_enabled: true, gold_enabled: true, giftcard_enabled: true, giftcard_min: 5,
   product_enabled: true, product_min: 70, loot_enabled: true, keywords: [],
   convert_enabled: true, sankmo_api_url: "", sankmo_token: "", convert_mode: "sankmo_api",
   earnkaro_token: "", extrape_token: "", amazon_route: "extrape", affiliate_routes: {}, telegram_converter_token: "", telegram_converter_username: "", telegram_converter_url: "", telegram_converter_connected: false,
@@ -246,11 +246,12 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
   deal.affiliate_url = await safeConvert(deal.clean_url, settings);
   deal.converted = deal.affiliate_url !== deal.clean_url;
   deal.featured = false;
-  deal.publication_status = "draft";
+  deal.publication_status = source.id !== "manual" && settings.auto_publish !== false ? "published" : "draft";
+  if (deal.publication_status === "published") deal.published_at = now();
   deal.score = engine.score(deal);
   const allowed = ["id", "dedupe_key", "title", "text", "note", "url", "clean_url", "affiliate_url", "converted", "store", "price", "mrp", "discount",
     "text_price", "text_mrp", "categories", "image", "source", "source_id", "source_post_url", "posted_to", "posted_at", "created_at", "title_key",
-    "product_key", "offers", "featured", "score", "lowest_ever", "history_count", "lowest_seen", "highest_seen", "split", "split_index", "split_total", "post_title", "publication_status"];
+    "product_key", "offers", "featured", "score", "lowest_ever", "history_count", "lowest_seen", "highest_seen", "split", "split_index", "split_total", "post_title", "publication_status", "published_at"];
   const row = Object.fromEntries(allowed.filter((k) => deal[k] !== undefined).map((k) => [k, deal[k]]));
   const r = await db.from("deals").insert(row);
   if (r.error) {

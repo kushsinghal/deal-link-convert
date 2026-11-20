@@ -30,9 +30,8 @@ export function verifyAdminToken(token: string): boolean {
 
 /** Scheduled scans (Render Cron Job) send CRON_SECRET as a Bearer token or x-cron-secret header. */
 export function verifyCronRequest(request: Request): boolean {
-  const expected = process.env["CRON_SECRET"];
-  if (!expected) return false;
+  const secrets = [process.env["CRON_SECRET"], process.env["WEBHOOK_CRON_SECRET"]].filter(Boolean) as string[];
   const url = new URL(request.url);
   const given = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "") || request.headers.get("x-cron-secret") || url.searchParams.get("key") || "";
-  return !!given && same(given, expected);
+  return !!given && secrets.some((expected) => same(given, expected));
 }

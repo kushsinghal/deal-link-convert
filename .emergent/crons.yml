@@ -1,0 +1,8 @@
+crons:
+  - name: fetch-deals
+    description: "Checks every deal source every 15 minutes and imports new deals"
+    cron: "*/15 * * * *"
+    # Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+    endpoint: "{{BASE_URL}}/api/public/cron/tick"
+    method: POST
+    enabled: true

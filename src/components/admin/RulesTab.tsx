@@ -26,7 +26,7 @@ export const RulesTab = () => {
   const set = (k) => (v) => setS({ ...s, [k]: v?.target ? v.target.value : v });
   const save = async () => {
     try { await api.put("/settings", {
-      auto_post: s.auto_post, split_multi: s.split_multi !== false, gold_enabled: s.gold_enabled !== false, supercoin_enabled: s.supercoin_enabled, giftcard_enabled: s.giftcard_enabled,
+      auto_post: s.auto_post, auto_publish: s.auto_publish !== false, split_multi: s.split_multi !== false, gold_enabled: s.gold_enabled !== false, supercoin_enabled: s.supercoin_enabled, giftcard_enabled: s.giftcard_enabled,
       giftcard_min: Number(s.giftcard_min), product_enabled: s.product_enabled, product_min: Number(s.product_min),
       loot_enabled: s.loot_enabled, post_style: s.post_style || "simple", check_interval_seconds: Number(s.check_interval_seconds),
       website_max_age_hours: Math.max(Number(s.website_max_age_hours) || 1, 1), telegram_max_age_minutes: Math.max(Number(s.telegram_max_age_minutes) || 1, 1),
@@ -34,8 +34,9 @@ export const RulesTab = () => {
     }); toast.success("Rules saved"); } catch (e) { toast.error(errMsg(e)); }
   };
   return (
-    <Panel testid="rules-panel" title="What counts as a deal" desc="Matching posts are saved as drafts. Review and publish them before sending to Telegram. Automatic imports require a hosting scheduler; saving a timing value alone does not create one.">
+    <Panel testid="rules-panel" title="What counts as a deal" desc="Sources are checked automatically every 15 minutes. Choose whether matching posts go live immediately or wait as drafts for your review.">
       <div className="space-y-3">
+        <Row testid="rule-auto-publish-switch" label="Publish fetched deals automatically" desc="On: new deals appear on the website right away. Off: they wait as drafts until you review and publish them" checked={s.auto_publish !== false} onToggle={set("auto_publish")} />
         <Row testid="rule-auto-post-switch" label="Auto-post to Telegram" desc="Send matching deals to your channels as soon as they're found" checked={s.auto_post} onToggle={set("auto_post")} />
         <Row testid="rule-split-multi-switch" label="Split posts with many links" desc="A post with several product links becomes one deal per product (up to 10), each with its own picture and your link" checked={s.split_multi !== false} onToggle={set("split_multi")} />
         <div className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">

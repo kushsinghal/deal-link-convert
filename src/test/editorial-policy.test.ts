@@ -40,10 +40,10 @@ describe("review policy", () => {
     expect(result.post_results).toEqual([]);
     expect(state.sent).toBe(0);
   });
-  it("holds imported offers as drafts and preserves original source time", async () => {
+  it("auto-publishes imported offers by default and preserves original source time", async () => {
     const result = await fetchSource({ id: "TEST_source", name: "TEST source", kind: "rss", value: "https://example.org/feed" });
     expect(result.new_deals).toBe(1);
-    expect(state.tables.deals[0]).toMatchObject({ publication_status: "draft", posted_at: state.sourceTime, posted_to: [] });
+    expect(state.tables.deals[0]).toMatchObject({ publication_status: "published", posted_at: state.sourceTime, posted_to: [] });
     expect(state.sent).toBe(0);
   });
   it("filters drafts from every public deal read but includes them in review", async () => {

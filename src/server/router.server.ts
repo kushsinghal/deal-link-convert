@@ -58,6 +58,12 @@ export async function handle(request: Request, splat: string) {
       if (a === "image-proxy") return await core.imageProxy(qp("url") || "");
       if (a === "public-settings") return json(await core.publicSettingsView());
     }
+    if (method === "POST" && a === "cron" && b === "tick") {
+      // Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+      const { verifyCronRequest } = await import("./auth.server");
+      if (!verifyCronRequest(request)) return json({ detail: "Unauthorized" }, 401);
+      return json(await core.startFetchAll(publicOrigin(url), { wait: false }), 202);
+    }
     if (method === "POST" && a === "cron" && b === "fetch") {
       const { verifyCronRequest } = await import("./auth.server");
       if (!verifyCronRequest(request)) return json({ detail: "Unauthorized" }, 401);
