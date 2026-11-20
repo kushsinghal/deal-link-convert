@@ -258,6 +258,9 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
     console.warn("deal insert failed", r.error.message);
     return null;
   }
+  if (deal.publication_status === "published" && deal.product_key && typeof deal.price === "number" && deal.price > 0) {
+    await db.from("price_history").insert({ deal_id: deal.id, product_key: deal.product_key, price: deal.price, mrp: deal.mrp ?? null, store: deal.store, at: deal.published_at });
+  }
   try { await enrich(deal.id); } catch (e) { console.warn("enrich failed", e?.message); }
   const fresh = (rawPosted || source.id === "manual") && ageMinutes(postedAt) <= settings.telegram_max_age_minutes;
   if (autopost && fresh && settings.auto_post) {
@@ -315,7 +318,7 @@ export async function fetchSource(src: any, runId?: string | null) {
   for (const it of items) {
     try {
       const parsed: any = engine.parseItem(it.text, it.links, it.image, settings);
-      if (!parsed || !parsed.categories.length) continue;
+      if (!parsed || !parsed.categories.length || /\b(out of stock|sold out|deal (has )?ended|offer (has )?ended|coupon has ended|expired)\b/i.test(it.text)) continue;
       parsed.ext_id = it.ext_id;
       parsed.posted_at = it.posted_at;
       parsed.source_post_url = it.post_url;

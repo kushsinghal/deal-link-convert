@@ -8,7 +8,7 @@ export async function saveReview(id: string, body: any) {
   const title = String(body.title || "").trim();
   const editorial_note = String(body.editorial_note || "").trim();
   const publish = body.publish === true;
-  if (title.length < 8 || title.length > 180) throw new Error("Use a descriptive title between 8 and 180 characters.");
+  if (publish && (title.length < 8 || title.length > 180)) throw new Error("Use a descriptive title between 8 and 180 characters.");
   if (editorial_note.length > 5000) throw new Error("Keep your review under 5,000 characters.");
   if (publish && (editorial_note.length < 80 || body.review_confirmed !== true)) throw new Error("Add at least 80 characters of original buying advice and confirm the review checklist before publishing.");
   const db = await mongo();

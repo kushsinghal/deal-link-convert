@@ -74,7 +74,7 @@ export const DealsTab = () => {
   useEffect(() => { load(); }, []);
   const shown = list.filter((d) => inTab(d, tab));
   return (
-    <Panel testid="admin-deals-panel" title="Review queue" desc="Drafts are private. Add original buying advice and verify the offer before publishing or sending to Telegram.">
+    <Panel testid="admin-deals-panel" title="Review queue" desc="Fetched deals are published automatically when that rule is on. Use “Save as draft” to unpublish a deal, or add your own buying advice before publishing.">
       <div className="mb-4 flex flex-wrap gap-2">
         {TABS.map((t) => (
           <button key={t} data-testid={`admin-store-tab-${t.toLowerCase()}`} onClick={() => setTab(t)}

@@ -54,7 +54,7 @@ describe("review policy", () => {
   });
   it("requires original advice and confirmation, supports publication and unpublication", async () => {
     state.tables.deals = [{ id: "TEST_review", title: "TEST original product", publication_status: "draft" }];
-    await expect(saveReview("TEST_review", { title: "short", publish: false })).rejects.toThrow("8 and 180");
+    await expect(saveReview("TEST_review", { title: "short", publish: true })).rejects.toThrow("8 and 180");
     await expect(saveReview("TEST_review", { title: "TEST reviewed product", editorial_note: "short", publish: true, review_confirmed: true })).rejects.toThrow("80 characters");
     await expect(saveReview("TEST_review", { title: "TEST reviewed product", editorial_note: "x".repeat(80), publish: true })).rejects.toThrow("checklist");
     expect(await saveReview("TEST_review", { title: "TEST reviewed product", editorial_note: "x".repeat(80), publish: true, review_confirmed: true })).toBe(true);

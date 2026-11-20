@@ -53,19 +53,11 @@ export const RulesTab = () => {
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">
             <p className="font-semibold">Check for deals every</p>
-            <p className="mb-2 text-xs text-slate-500">How often all sources are scanned</p>
-            <Select value={String(s.check_interval_seconds)} onValueChange={set("check_interval_seconds")}>
-              <SelectTrigger data-testid="rule-interval-select" className={fieldCls}><SelectValue /></SelectTrigger>
-              <SelectContent className="border-slate-200 bg-white text-slate-900">
-                {[30, 60, 120, 300, 600, 900, 1800, 3600].map((m) => (
-                  <SelectItem key={m} value={String(m)}>{m < 60 ? `${m} seconds` : m < 3600 ? `${m / 60} minute${m > 60 ? "s" : ""}` : "1 hour"}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <p data-testid="rule-interval-info" className="text-sm text-slate-700">Every 15 minutes (automatic schedule). Use "Fetch now" in Sources for an immediate check.</p>
           </div>
           <div className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">
             <p className="font-semibold">Max deals posted per update</p>
-            <p className="mb-2 text-xs text-slate-500">Between 1 and 200. Unreviewed deals remain private drafts.</p>
+            <p className="mb-2 text-xs text-slate-500">Between 1 and 200 Telegram posts per scan.</p>
             <Input data-testid="rule-max-posts-input" type="number" min={1} max={200} value={s.max_posts_per_update} onChange={set("max_posts_per_update")} className={fieldCls} />
           </div>
           <div className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">

@@ -1,0 +1,43 @@
+{
+  "summary": "Tested deal fetching and auto-publish. New pytest file: 6/6 passed. Public /api/public/deals returns 115-117 published deals and all have publication_status=published. POST /cron/tick without auth or with a wrong token returns 401. With WEBHOOK_CRON_SECRET it returns 202 in 0.13s with {queued:true,sources:40}. A second tick while a scan is running returns 202 {queued:false,running:true}. Total went from 115 to 116 after the scan. The auto_publish setting defaults to true, toggles to false, persists, and was restored to true. A manual deal (post_now:false) is saved as a draft and is not public. Publish and unpublish through /review work. UI on desktop 1920: 117 cards. Category tabs work (best 15, supercoin 0, gift 1, price drops 107, gold 9, lowest 16, starred 0). Search 'gold' gives 10 results. A search with no match shows 'No offers match your search.' Mobile 390: 0px horizontal overflow. In Admin, the Rules switch rule-auto-publish-switch starts ON. Toggling it off and saving persists through API and reload, and it was restored to ON. The Sources tab lists 40 sources and shows errors: desidime web x2 'HTTP 403', and tapworthy and hotdealsbywd 'public web preview' turned off. The nitter 404 had cleared by the latest scan: no nitter source has last_error now. In the Deals tab, Review & edit then 'Save as draft' unpublished a TEST published fixture, which then disappeared from public /deals. INTERMITTENT: 2 of about 10 home page loads stayed stuck on 'Loading offers...' because Vite dev modules (tailwind-merge.js, react-router useSearch.js) returned 503. Hydration failed and the deals never loaded. Deals are fetched only on the client, not server-rendered. It could not be reproduced afterwards: 0 errors in 5 loads with cache disabled, and the modules and API stayed 200 during a running scan. So it is probably preview edge or dev-server flakiness, not the scan blocking.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "ingest() in core.server.ts ~line 245", "issue": "Auto-published deals never write price_history; only review.server saveReview does. The collection has 1 row for about 116 published deals, so the price-history panel and the lowest-observed history are empty for fetched deals."},
+      {"endpoint": "PUT /api/public/deals/{id}/review publish:false", "issue": "Unpublishing still requires a title of 8-180 characters. A fetched deal with a short title cannot be unpublished until its title is edited."},
+      {"endpoint": "sources", "issue": "The 2 desidime.com website sources always fail with HTTP 403. The desidime and dealsmagnet website sources point at single-deal URLs (e.g. /deals/100-supercoin-back-on-2193106), not listing pages, so they add little."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Home deals grid", "issue": "Intermittent (about 20% right after the frontend restart; 0% later): a dev module returns 503, hydration fails, and 'Loading offers...' stays forever with no retry or error state. Deals are not server-rendered.", "selector": "[data-testid='deals-loading']", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin Rules", "issues": ["The panel says 'Sources are checked automatically every 15 minutes' but the 'Check for deals every' select shows '5 minutes' (stats check_interval_seconds=300). The two contradict each other.", "The 'Max deals posted per update' help says 'Unreviewed deals remain private drafts', which is wrong while auto-publish is ON."]},
+      {"screen": "Admin Sources", "issues": ["The subtitle 'Imported deals stay private until reviewed', the 'Import drafts' button and the 'N drafts imported' labels are out of date now that auto-publish is ON.", "Many sources still show raw host names (e.g. 'nitter.mie.foundation' x several, 'desidime.com (website)' x2), so they are hard to tell apart."]},
+      {"screen": "Admin Deals", "issues": ["The review queue says 'Drafts are private...' and unpublishing is done with the 'Save as draft' button. An explicit 'Unpublish' label would be clearer."]},
+      {"screen": "Home", "issues": ["Some auto-published cards are raw promo posts, e.g. 'The Kalyan Jewellers gold deal is now OUT OF STOCK ... Join', which comes with auto-publish. Some cards use a letter placeholder instead of an image."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_deal_fetching_autopublish.py", "/app/test_reports/pytest/iteration_3.xml"],
+  "action_items": [
+    "Make the home deals list robust: server-render the deals with a route loader, or add an error and retry state, so a failed client fetch or hydration does not leave 'Loading offers...' forever.",
+    "Record price_history when ingest auto-publishes a deal, as saveReview does.",
+    "Bring the admin copy in line with auto-publish (Sources subtitle, 'Import drafts', 'drafts imported', the 'Max deals' help), and fix the 15-minute vs 5-minute check interval wording.",
+    "Optional: allow unpublishing (publish:false) without enforcing the title length; drop or disable the desidime website sources that return 403; skip 'OUT OF STOCK' posts when ingesting."
+  ],
+  "critical_code_review_comments": [
+    "core.server.ts is 891 lines, over the 700-line threshold.",
+    "verifyCronRequest also accepts the secret in the ?key= query string, so it can leak into access logs. Prefer header-only.",
+    "addDeal defaults post_now to true and calls postDeal for a draft manual deal. Check that postDeal itself refuses drafts; only repost() checks publication_status.",
+    "router.server.ts handles cron/fetch twice (GET and POST); only tick is needed for the scheduler."
+  ],
+  "updated_files": ["/app/backend/tests/test_deal_fetching_autopublish.py"],
+  "success_rate": {"backend": "100% (6/6)", "frontend": "95% (intermittent 503 hydration failure)"},
+  "test_credentials": "/app/memory/test_credentials.md: /admin password preview123",
+  "seed_data_creation": "None kept. Created a TEST_manual draft through the API, deleted by id. Inserted the TEST_unpub_ui_01 published fixture into the DB and deleted it by id. auto_publish was restored to true. 3 cron ticks ran real scans, which added about 2 real deals (expected behaviour).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "40 real sources and about 117 real published deals; do not delete them. The scheduler is webhook-crond (crons.yml, every 15 minutes) calling POST /api/public/cron/tick. Use post_now:false when creating manual deals. Unpublish in the UI: Deals tab, review-open-{id}, then review-draft-{id}. If the home page sticks on 'Loading offers...', look for 503s on /node_modules/.vite modules."
+}
