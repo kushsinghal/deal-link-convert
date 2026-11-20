@@ -46,7 +46,8 @@ export async function telegramCall(token: string, method: string, body: Record<s
   return data.result;
 }
 
-const RADHE = /^(?:\/radhe(?:@\w+)?|@radhe|radhe)$/i;
+const RADHE = /^(?:\/radhe(?:@\w+)?|@radhe|radhe(?:\s+radhe)*)$/i;
+const PLAIN_START = /^\/start(?:@\w+)?$/i;
 const EXTRAPE_KEY_ERROR = /ExtraPe access token expired or invalid|Add your ExtraPe access token/i;
 const botId = (token: string) => token.split(":")[0];
 
@@ -61,9 +62,12 @@ export async function notifyOwner(text: string, alertKey?: string) {
   if (!token) return 0;
   const db = await mongo();
   if (alertKey) {
-    const claim = await db.collection("converter_alerts").updateOne({ _id: alertKey as any, at: { $gt: Date.now() - 6 * 3600_000 } }, { $setOnInsert: { at: Date.now() } }, { upsert: false });
-    if (claim.matchedCount) return 0;
-    await db.collection("converter_alerts").updateOne({ _id: alertKey as any }, { $set: { at: Date.now() } }, { upsert: true });
+    try {
+      await db.collection("converter_alerts").updateOne({ _id: alertKey as any, at: { $lte: Date.now() - 6 * 3600_000 } }, { $set: { at: Date.now() } }, { upsert: true });
+    } catch (e: any) {
+      if (e?.code === 11000) return 0;
+      throw e;
+    }
   }
   let sent = 0;
   for (const chat of await connectedChats(token)) {
@@ -95,8 +99,9 @@ export async function checkConverterHealth() {
   let info: any;
   try { info = await telegramCall(token, "getWebhookInfo", {}); } catch (e) { return { checked: true, error: (e as Error).message }; }
   if (info.url === expected) return { checked: true, ok: true };
-  // Another copy of the site (preview or live) took over the bot; don't fight it.
-  if (info.url) return { checked: true, ok: true, other_url: info.url };
+  // Another copy of the site owns the bot; take it back only if that copy is failing (e.g. a sleeping preview).
+  const failing = info.last_error_date && Date.now() / 1000 - info.last_error_date < 900 && /404|5\d\d|timeout|timed out|connection|resolve/i.test(info.last_error_message || "");
+  if (info.url && !failing) return { checked: true, ok: true, other_url: info.url };
   try {
     await telegramCall(token, "setWebhook", { url: expected, secret_token: webhookSecret(token), allowed_updates: ["message", "channel_post"], drop_pending_updates: false });
     await notifyOwner("🔄 The converter bot connection was lost and has been restored automatically. You can keep sending links.", "converter-restored");
@@ -165,6 +170,10 @@ export async function receiveConverter(request: Request, body: unknown) {
   if (RADHE.test(text.trim()) || (pair?.[1] && validPairing(pair[1], token))) {
     await chats.updateOne({ _id: chatKey as any }, { $set: { bot, chat_id: String(msg.chat.id), type: msg.chat.type, connected_at: new Date().toISOString() } }, { upsert: true });
     if (msg.chat.type !== "channel") await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "✅ Connected. Radhe Radhe! Send your links or deal text here and I'll reply with your affiliate links." });
+    return Response.json({ ok: true });
+  }
+  if (PLAIN_START.test(text.trim()) && msg.chat.type !== "channel") {
+    await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "👋 Send /Radhe to connect this chat, then send your links or deal text." });
     return Response.json({ ok: true });
   }
   // Unknown chats cannot use the owner's paid affiliate credentials.

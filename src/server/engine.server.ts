@@ -650,6 +650,7 @@ async function runChain(url: string, settings: any, chain: string[]) {
     const [name, fn] = CONVERTERS[key];
     try { return await fn(url, settings); } catch (e) {
       const msg = e?.message || `${name} conversion failed`;
+      void import("./telegram-converter.server").then((t) => t.alertIfKeyFailed(msg)).catch(() => {});
       errors.push(errors.length && !msg.startsWith(name) ? `${name} backup: ${msg}` : msg);
     }
   }

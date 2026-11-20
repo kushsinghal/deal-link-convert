@@ -1,0 +1,33 @@
+{
+  "summary": "Backend-only test of /Radhe webhook reply, checkConverterHealth webhook ownership, and alertIfKeyFailed key-expiry alerts. New vitest file src/test/telegram-alerts-health.test.ts (23 tests). It uses a fake bot token and mocked fetch, and runs against an ISOLATED Mongo DB (dealloot_t1_isolated_test, dropped afterwards), so the real settings in dealloot_preview were never touched. All 23 pass. Full suite: 86/86 pass (63 existing + 23 new). Admin API smoke test passed: login OK, converter_order ['extrape','earnkaro','sankmo'], flipkart convert -> https://fkrt.co/9ZUZEa, X test posts=5 (called once), unsigned webhook -> 401. Read-only getWebhookInfo on the real bot: url = the current preview URL, pending 0, last_error 17:58:46Z '404 Not Found'. The owner chat 1089828186 was re-recorded at 17:59:46Z, so a /Radhe reached the server after the 404 and was processed. No real messages were sent. setWebhook/deleteWebhook were never called on the real token.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "engine.runChain / alertIfKeyFailed", "issue": "Key alerts only fire when the WHOLE converter chain fails. If ExtraPe's token expires but the EarnKaro/Sankmo backup succeeds, runChain returns success and the per-converter errors are thrown away. The owner is never told the ExtraPe key expired, which misses the user's 'tell me when ExtraPe stops working' request. Same for an EarnKaro key that fails while Sankmo succeeds."},
+      {"endpoint": "receiveConverter", "issue": "A new chat that sends plain '/start' (what Telegram sends when the user presses START) gets no reply at all: it is silently ignored with {ok:true}. Only /Radhe, @radhe, radhe or '/start <signed code>' get a reply. 'Radhe Radhe' (two words) also does not match. A user who presses Start sees 'nothing on the bot'."},
+      {"endpoint": "checkConverterHealth", "issue": "Working as specified (does not override another URL). Side effect: if the webhook is owned by a preview copy that goes to sleep (exactly the 404 at 17:58), the live site never takes it back, so the bot stays dead until someone presses Connect. Consider reading info.last_error_message (404/5xx) together with other_url and alerting the owner when the owning URL is failing."},
+      {"endpoint": "notifyOwner", "issue": "The 6h dedupe is not atomic (a check, then a separate upsert), so concurrent failures (e.g. several sources fetched in parallel) can send duplicate alerts. Use a single findOneAndUpdate/upsert with a unique _id + at condition. Also, the alert slot is recorded even when there are no connected chats or sendMessage fails, so a failed alert is suppressed for 6h."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/src/test/telegram-alerts-health.test.ts", "/app/scripts/t1_api_smoke.sh", "/app/scripts/t1_webhook_info_readonly.cjs"],
+  "action_items": [
+    "Optional: send owner alerts for per-converter key errors even when a backup converter succeeds (collect errors in runChain and call alertIfKeyFailed on them).",
+    "Optional: reply to a bare '/start' (and 'Radhe Radhe') with instructions or the Connected message, so a user pressing START gets a response.",
+    "Optional: make the notifyOwner dedupe atomic, and only record the alert slot after at least one sendMessage succeeds.",
+    "Tell the user the /Radhe silence was caused by the webhook pointing at the preview URL while the preview slept (Telegram got 404). As long as the webhook points to preview, the bot works only while the preview is awake. Reconnect from the live Render URL for an always-on bot."
+  ],
+  "critical_code_review_comments": [
+    "core.server.ts is 906 lines (>700). Consider splitting it.",
+    "RADHE regex /^(?:\\/radhe(?:@\\w+)?|@radhe|radhe)$/i is verified for '/Radhe', 'Radhe', '/radhe@xtelgobot' and ' /RADHE ' (trimmed).",
+    "safeConvert and fetchSource call alertIfKeyFailed through fire-and-forget dynamic imports (call sites verified in code). The Telegram flow calls it per failed item in the background task (line 220).",
+    "EarnKaro regex alternatives 'log ?in' and 'jwt' are broad but scoped to text after 'EarnKaro' and before ';'. The listed negative cases did not trigger an alert."
+  ],
+  "updated_files": ["/app/src/test/telegram-alerts-health.test.ts", "/app/scripts/t1_api_smoke.sh", "/app/scripts/t1_webhook_info_readonly.cjs"],
+  "success_rate": {"backend": "100% (86/86 vitest, 5/5 API smoke)", "frontend": "not tested (backend only)"},
+  "seed_data_creation": "None in dealloot_preview. Test data lived only in the dealloot_t1_isolated_test DB, which was dropped afterwards.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: npx vitest run (86 tests). telegram-alerts-health.test.ts overrides DB_NAME to an isolated DB and stubs fetch so it only accepts api.telegram.org calls with the fake token. Do not set the node environment pragma: setup.ts needs jsdom. scripts/t1_api_smoke.sh = admin API smoke test (calls the real ExtraPe and X once). scripts/t1_webhook_info_readonly.cjs = read-only real webhook status (never prints the token). The real converter_alerts already has an 'extrape-key' entry in dealloot_preview (not created by this agent).",
+  "rca of the issue": "Real getWebhookInfo: url = https://deal-link-convert--6klenmt5.preview.emergentagent.com/api/public/telegram/converter, last_error 2026-11-20T17:58:46Z 'Wrong response from the webhook: 404 Not Found', pending 0. The bot's webhook is owned by the preview environment. When the preview sleeps, the ingress returns 404 and Telegram drops/retries the /Radhe update, so no reply arrives. telegram_converter_chats shows chat 1089828186 connected_at 17:59:46Z: once the preview woke, /Radhe was processed. The code path itself works (verified by unit tests with the real Mongo driver). Mitigation: connect the bot from the always-on live (Render) URL. The new health check will then not let a sleeping preview's ownership be overridden, so whichever copy pressed Connect last owns the bot."
+}
