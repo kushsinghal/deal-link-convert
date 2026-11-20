@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { convertAffiliateText } from "@/server/affiliate.server";
 import { adminSettingsView } from "@/server/core.server";
-import { pairingCode, validPairing, receiveConverter, webhookSecret } from "@/server/telegram-converter.server";
+import * as converter from "@/server/telegram-converter.server";
+const { pairingCode, validPairing, receiveConverter, webhookSecret } = converter;
 
 const state = vi.hoisted(() => ({ paired: false, done: false, sends: [] as any[] }));
 vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: string) => ({
@@ -100,11 +101,27 @@ describe("Telegram affiliate conversion", () => {
     mockProviders(); state.paired = true;
     const body = { update_id: 1, message: { message_id: 2, chat: { id: 3, type: "private" }, text: "Deal! https://www.flipkart.com/item/p/itm123?affid=other" } };
     const request = new Request("https://app.test", { headers: { "x-telegram-bot-api-secret-token": webhookSecret(token) } });
-    expect((await receiveConverter(request, body)).status).toBe(200);
-    expect(state.sends[0].body.text).toBe("Deal! @Flipkart");
-    expect(state.sends[0].body.entities).toEqual([{ type: "text_link", offset: 6, length: 9, url: "https://ekaro.in/mine" }]);
-    expect((await receiveConverter(request, body)).status).toBe(200);
-    expect(state.sends).toHaveLength(1);
+    const first = await receiveConverter(request, body);
+    expect(first.status).toBe(200);
+    const sent = await first.json();
+    expect(sent).toMatchObject({ method: "sendMessage", chat_id: 3, text: "Deal! @Flipkart" });
+    expect(sent.entities).toEqual([{ type: "text_link", offset: 6, length: 9, url: "https://ekaro.in/mine" }]);
+    await converter.lastBackground;
+    expect(await (await receiveConverter(request, body)).json()).toEqual({ ok: true });
+    expect(state.sends).toHaveLength(0);
+  });
+  it("converts shop links only, including links typed without http, and leaves other links and text untouched", async () => {
+    mockProviders();
+    const text = "Loot amzn.to/abc and news https://example.org/story ok";
+    vi.stubGlobal("fetch", vi.fn(async (input: any) => {
+      const url = String(input);
+      if (url.includes("amzn.to")) return new Response("", { status: 302, headers: { location: "https://www.amazon.in/dp/B000000001?tag=other-21" } });
+      if (url.includes("ekaro-api")) return Response.json({ success: 1, data: "https://ekaro.in/mine" });
+      return new Response("<html></html>");
+    }));
+    const result = await convertAffiliateText(text, { earnkaro_token: "configured", amazon_route: "earnkaro", affiliate_routes: { Other: "original" } }, [{ type: "url", offset: 5, length: 11 }, { type: "url", offset: 26, length: 25 }]);
+    expect(result.message).toBe("Loot @Amazon and news https://example.org/story ok");
+    expect(result.entities).toEqual([{ type: "text_link", offset: 5, length: 7, url: "https://ekaro.in/mine" }]);
   });
   it("edits paired channel posts in place instead of reposting", async () => {
     vi.stubEnv("SESSION_SECRET", "test-session-signing-secret-for-telegram");

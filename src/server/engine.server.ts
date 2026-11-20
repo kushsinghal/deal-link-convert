@@ -483,6 +483,7 @@ export function stripAffiliate(url: string) {
   return rebuild(p, params);
 }
 
+export const isShortLink = (url: string) => SHORT_DOMAINS.some((d) => url.toLowerCase().includes(d));
 const needsResolve = (url: string) => SHORT_DOMAINS.some((d) => url.toLowerCase().includes(d)) || detectStore(url) === "Other";
 
 export async function resolveDealsmagnet(url: string): Promise<[string, string | null]> {
@@ -509,18 +510,20 @@ export async function fetchOgImage(url: string) {
   }
 }
 
-export async function cleanLink(url: string) {
+/** fast: used by the Telegram bot, where an ordinary web page must not hold up the reply. */
+export async function cleanLink(url: string, fast = false) {
   url = unwrap(url).replace("://dl.flipkart.com/dl/", "://www.flipkart.com/");
   if (needsResolve(url)) {
     try {
       for (let i = 0; i < 8; i++) {
-        const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(8000) });
+        const r = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(fast ? 1500 : 8000) });
         const loc = r.headers.get("location");
         if (r.status >= 300 && r.status < 400 && loc) {
           url = unwrap(new URL(loc, url).toString());
           if (!needsResolve(url)) break;
           continue;
         }
+        if (fast && !isDealSite(url) && !isShortLink(url)) { void r.body?.cancel(); break; }
         const body = await r.text();
         const found = findUrls(body).filter((u) => detectStore(u) !== "Other");
         const visit = body.match(/https:\/\/visit\.desidime\.com\/visit\/[^"'\s<>]+/g) || [];

@@ -178,28 +178,34 @@ export async function receiveConverter(request: Request, body: unknown) {
   const messageAt = typeof (msg as any).date === "number" ? (msg as any).date * 1000 : receivedAt;
   try {
     const result = await convertAffiliateText(text, settings, msg.entities || msg.caption_entities || []);
-    if (result.items.length) {
-      // Do not label a failed conversion as an earning link or modify the channel post on failure.
-      if (result.items.some((i) => i.error)) {
-        if (msg.chat.type !== "channel") await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: `Conversion failed: ${result.items.filter((i) => i.error).map((i) => i.error).join("; ").slice(0, 3500)}` });
-        else console.error("Telegram channel conversion failed; original post kept", result.items.filter((i) => i.error).map((i) => i.error));
-      } else if (msg.chat.type === "channel") {
+    const failed = result.items.filter((i) => i.error);
+    const changed = result.items.some((i) => i.changed && !i.error);
+    const own = result.items.some((i: any) => i.own);
+    const direct = msg.chat.type !== "channel";
+    // Convert what can be converted; every other link and all normal text stay exactly as sent.
+    let reply: Record<string, unknown> | null = null;
+    if (!result.items.length) reply = null;
+    else if (changed || own) {
+      if (!direct) {
         if (result.message !== text || JSON.stringify(result.entities) !== JSON.stringify(msg.entities || msg.caption_entities || [])) {
           await telegramCall(token, msg.text !== undefined ? "editMessageText" : "editMessageCaption", { chat_id: msg.chat.id, message_id: msg.message_id,
             ...(msg.text !== undefined ? { text: result.message, entities: result.entities } : { caption: result.message, caption_entities: result.entities }) });
         }
       } else {
         if (result.message.length > 4096) throw new Error("Converted message is too long for Telegram; send fewer links in one message");
-        await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: result.message, entities: result.entities, reply_parameters: { message_id: msg.message_id } });
+        reply = { chat_id: msg.chat.id, text: result.message, entities: result.entities, reply_parameters: { message_id: msg.message_id } };
       }
-    }
+    } else if (!direct) { if (failed.length) console.error("Telegram channel conversion failed; original post kept", failed.map((i) => i.error)); }
+    else if (failed.length) reply = { chat_id: msg.chat.id, text: `Conversion failed: ${[...new Set(failed.map((i) => i.error))].join("; ").slice(0, 3500)}` };
+    else reply = { chat_id: msg.chat.id, text: "No shop link that can be converted was found in this message.", reply_parameters: { message_id: msg.message_id } };
     const repliedAt = Date.now();
     await updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } });
     // The reply is already sent; saving the deal (slow product lookup) and logging must not delay it.
     lastBackground = (async () => {
       if (!result.items.length) return;
+      if (direct && changed && failed.length) await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: `${failed.length} link(s) could not be converted and were left as they are: ${[...new Set(failed.map((i) => i.error))].join("; ").slice(0, 3000)}` }).catch(() => {});
       await db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, store: i.store, original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted,
-        status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error, message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: new Date(repliedAt).toISOString(),
+        status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error || (!i.changed && !i.own ? "Not a convertible shop link; left as it is" : null), message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: new Date(repliedAt).toISOString(),
         convert_ms: repliedAt - receivedAt, total_ms: Math.max(0, repliedAt - messageAt) })));
       for (const i of result.items) await alertIfExtraPeKeyFailed(i.error);
       for (const item of result.items) {
@@ -207,7 +213,8 @@ export async function receiveConverter(request: Request, body: unknown) {
         await publishConversion({ original: item.original, cleaned: item.cleaned, converted: item.converted, error: null, text, settings, source: "Telegram converter" });
       }
     })().catch((e) => console.error("converter background work failed", e?.message));
-    return Response.json({ ok: true });
+    // Answering inside the webhook response saves a separate round trip to Telegram.
+    return Response.json(reply ? { method: "sendMessage", ...reply } : { ok: true });
   } catch (error) {
     await updates.updateOne({ _id: key }, { $set: { locked_until: 0 } });
     throw error;

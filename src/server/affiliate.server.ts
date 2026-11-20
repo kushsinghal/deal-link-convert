@@ -11,21 +11,26 @@ function isOwnAffiliateLink(url: string, settings: any) {
   return !!tag && host.includes("amazon.") && p.searchParams.get("tag") === tag;
 }
 
-export async function convertAffiliate(original: string, settings: any) {
+export async function convertAffiliate(original: string, settings: any, fast = false) {
   if (isOwnAffiliateLink(original, settings)) {
-    return { original, cleaned: original, converted: original, changed: false, error: null as string | null, store: engine.detectStore(original) };
+    return { original, cleaned: original, converted: original, changed: false, error: null as string | null, store: engine.detectStore(original), own: true };
   }
-  const cleaned = await engine.cleanLink(original);
+  const cleaned = await engine.cleanLink(original, fast);
   try {
-    const converted = await engine.convertLink(cleaned, settings);
+    // In the bot, a link that is not a known shop gets one quick attempt instead of the whole backup chain.
+    const quick = fast && engine.detectStore(cleaned) === "Other";
+    const converted = await engine.convertLink(cleaned, quick ? { ...settings, sankmo_token: "", earnkaro_token: settings.extrape_token ? "" : settings.earnkaro_token } : settings);
     return { original, cleaned, converted, changed: converted !== cleaned, error: null as string | null, store: engine.detectStore(cleaned) };
   } catch (error) {
-    return { original, cleaned, converted: cleaned, changed: false, error: String(error instanceof Error ? error.message : error).slice(0, 300), store: engine.detectStore(cleaned) };
+    const store = engine.detectStore(cleaned);
+    // Links to sites that are not shops (news, social, blogs) are simply left as they are.
+    if (store === "Other") return { original, cleaned, converted: original, changed: false, error: null as string | null, store, unsupported: true };
+    return { original, cleaned, converted: cleaned, changed: false, error: String(error instanceof Error ? error.message : error).slice(0, 300), store };
   }
 }
 
 type Entity = { type: string; offset: number; length: number; url?: string | undefined; [key: string]: unknown };
-type Span = { start: number; end: number; url: string };
+type Span = { start: number; end: number; url: string; raw: string };
 type Replacement = { start: number; end: number; newStart: number; newEnd: number };
 
 const linkLabel = (store: string) => `@${(store && store !== "Other" ? store : "Link").replace(/\s+/g, "")}`;
@@ -34,11 +39,24 @@ const linkLabel = (store: string) => `@${(store && store !== "Other" ? store : "
 export async function convertAffiliateText(text: string, settings: any, entities: Entity[] = []) {
   const spans: Span[] = [...text.matchAll(/https?:\/\/[^\s<>"')\]]+/g)].map((m) => {
     const url = m[0].replace(/[.,;!]+$/, "");
-    return { start: m.index!, end: m.index! + url.length, url };
+    return { start: m.index!, end: m.index! + url.length, url, raw: url };
   });
+  // Links typed without http (amzn.to/abc, www.flipkart.com/...) arrive from Telegram as "url" entities.
+  for (const e of entities) {
+    if (e.type !== "url" || spans.some((s) => e.offset < s.end && e.offset + e.length > s.start)) continue;
+    const raw = text.slice(e.offset, e.offset + e.length);
+    if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(raw)) spans.push({ start: e.offset, end: e.offset + e.length, url: `https://${raw}`, raw });
+  }
+  spans.sort((a, b) => a.start - b.start);
   const linkEntities = entities.filter((e) => e.type === "text_link" && e.url);
   const urls = [...new Set([...spans.map((s) => s.url), ...linkEntities.map((e) => e.url!)])];
-  const items = await Promise.all(urls.map((url) => convertAffiliate(url, settings)));
+  const items = await Promise.all(urls.map((url) => {
+    const job = convertAffiliate(url, settings, true);
+    if (engine.detectStore(url) !== "Other" || engine.isShortLink(url)) return job;
+    // An ordinary web page must never delay the reply for the real shop links.
+    const skip = new Promise<Awaited<typeof job>>((resolve) => setTimeout(() => resolve({ original: url, cleaned: url, converted: url, changed: false, error: null, store: "Other", unsupported: true } as any), 1800));
+    return Promise.race([job, skip]);
+  }));
   const byUrl = new Map(items.map((i) => [i.original, i]));
 
   let message = "";
@@ -48,11 +66,12 @@ export async function convertAffiliateText(text: string, settings: any, entities
   for (const span of spans) {
     message += text.slice(cursor, span.start);
     const item = byUrl.get(span.url)!;
-    const shown: string = item.error ? span.url : settings?.converter_label_style === "link" ? item.converted ?? span.url : linkLabel(item.store);
+    const keep = !!item.error || (!item.changed && !(item as any).own);
+    const shown: string = keep ? span.raw : settings?.converter_label_style === "link" ? item.converted ?? span.url : linkLabel(item.store);
     const newStart = message.length;
     message += shown;
     replacements.push({ start: span.start, end: span.end, newStart, newEnd: message.length });
-    if (!item.error) labelEntities.push({ type: "text_link", offset: newStart, length: shown.length, url: item.converted });
+    if (!keep) labelEntities.push({ type: "text_link", offset: newStart, length: shown.length, url: item.converted });
     cursor = span.end;
   }
   message += text.slice(cursor);
