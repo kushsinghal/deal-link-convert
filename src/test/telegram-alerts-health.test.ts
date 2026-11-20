@@ -7,6 +7,7 @@ const envFile = Object.fromEntries(readFileSync("/app/backend/.env", "utf8").spl
 process.env.MONGO_URL = process.env.MONGO_URL || envFile.MONGO_URL;
 process.env.DB_NAME = "dealloot_t1_isolated_test";
 process.env.SESSION_SECRET = "t1-test-session-secret-not-real";
+delete process.env.EXTRAPE_SESSION_SECRET; // keep settings.extrape_token under test control
 
 const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd";
 const SITE = "https://site.test";
@@ -14,6 +15,10 @@ const EXPECTED = `${SITE}/api/public/telegram/converter`;
 const CHAT_ID = "1089828186"; // fake chat in isolated DB; fetch is mocked so nothing reaches Telegram
 const calls: { method: string; body: any }[] = [];
 let webhookUrl = "";
+let webhookInfo: any = {};
+let sendDelayMs = 0;
+let extrapeReply: any = { errorCode: "AUTH", errorMessage: "token expired" };
+let earnkaroReply: any = { success: 1, data: "https://ekaro.in/enkr2026TEST" };
 
 let mongo: any, conv: any;
 beforeAll(async () => {
@@ -34,12 +39,19 @@ afterAll(async () => {
 beforeEach(async () => {
   calls.length = 0;
   webhookUrl = "";
+  webhookInfo = {};
+  sendDelayMs = 0;
+  extrapeReply = { errorCode: "AUTH", errorMessage: "token expired" };
+  earnkaroReply = { success: 1, data: "https://ekaro.in/enkr2026TEST" };
   vi.stubGlobal("fetch", vi.fn(async (input: any, init?: any) => {
     const url = String(input);
+    if (url.startsWith("https://www.extrape.com/")) { calls.push({ method: "extrape", body: {} }); return Response.json(extrapeReply); }
+    if (url.startsWith("https://ekaro-api.affiliaters.in/")) { calls.push({ method: "earnkaro", body: {} }); return Response.json(earnkaroReply, { status: earnkaroReply.success === 1 ? 200 : 401 }); }
     if (!url.startsWith(`https://api.telegram.org/bot${TOKEN}/`)) throw new Error("unexpected network call " + url);
     const method = url.split("/").pop()!;
     calls.push({ method, body: JSON.parse(String(init?.body || "{}")) });
-    if (method === "getWebhookInfo") return Response.json({ ok: true, result: { url: webhookUrl } });
+    if (method === "getWebhookInfo") return Response.json({ ok: true, result: { url: webhookUrl, ...webhookInfo } });
+    if (method === "sendMessage" && sendDelayMs) await new Promise((r) => setTimeout(r, sendDelayMs));
     return Response.json({ ok: true, result: true });
   }));
   await (await mongo()).collection("converter_alerts").deleteMany({ _id: { $in: ["extrape-key", "earnkaro-key", "sankmo-key", "x-cookie", "converter-restored", "converter-lost"] } });
@@ -131,5 +143,125 @@ describe("alertIfKeyFailed", () => {
     await db.collection("converter_alerts").updateOne({ _id: "earnkaro-key" }, { $set: { at: Date.now() - 7 * 3600_000 } }, { upsert: true });
     await conv.alertIfKeyFailed("EarnKaro: Unauthorized");
     expect(sends()).toHaveLength(1);
+  });
+});
+
+// Iteration 7: retest of iteration 6 fixes.
+const waitFor = async (fn: () => boolean, ms = 2000) => { const end = Date.now() + ms; while (!fn() && Date.now() < end) await new Promise((r) => setTimeout(r, 20)); };
+const hook = (update_id: number, chat: number, text: string) => conv.receiveConverter(new Request(EXPECTED, { method: "POST", headers: { "x-telegram-bot-api-secret-token": conv.webhookSecret(TOKEN) } }), { update_id, message: { message_id: 9, chat: { id: chat, type: "private" }, text } });
+
+describe("runChain per-converter alert", () => {
+  const settings = { extrape_token: "fake-extrape", earnkaro_token: "fake-earnkaro", converter_order: ["extrape", "earnkaro", "sankmo"] };
+  it("ExtraPe AUTH fails, EarnKaro backup succeeds -> EarnKaro link returned AND one extrape-key alert", async () => {
+    const { convertLink } = await import("@/server/engine.server");
+    const out = await convertLink("https://www.flipkart.com/p/itm123?pid=ABC", settings);
+    expect(out).toBe("https://ekaro.in/enkr2026TEST");
+    expect(calls.map((c) => c.method).slice(0, 2)).toEqual(["extrape", "earnkaro"]);
+    await waitFor(() => sends().length > 0);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(sends()).toHaveLength(1);
+    expect(sends()[0].body.text).toContain("ExtraPe key problem");
+    expect(await (await mongo()).collection("converter_alerts").findOne({ _id: "extrape-key" })).toBeTruthy();
+  });
+  it("ExtraPe succeeds -> no alert, EarnKaro not called", async () => {
+    extrapeReply = { convertedText: "https://fkrt.co/TESTok" };
+    const { convertLink } = await import("@/server/engine.server");
+    expect(await convertLink("https://www.flipkart.com/p/itm123?pid=ABC", settings)).toBe("https://fkrt.co/TESTok");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(calls.map((c) => c.method)).toEqual(["extrape"]);
+  });
+  it("ExtraPe INVALID_URL then EarnKaro ok -> no key alert", async () => {
+    extrapeReply = { errorCode: "INVALID_URL" };
+    const { convertLink } = await import("@/server/engine.server");
+    expect(await convertLink("https://www.flipkart.com/p/itm123?pid=ABC", settings)).toBe("https://ekaro.in/enkr2026TEST");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(sends()).toHaveLength(0);
+  });
+  it("both fail with key errors -> both alerts, each once", async () => {
+    earnkaroReply = { success: 0, message: "Unauthorized" };
+    const { convertLink } = await import("@/server/engine.server");
+    await expect(convertLink("https://www.flipkart.com/p/itm123?pid=ABC", settings)).rejects.toThrow(/ExtraPe access token expired.*EarnKaro/);
+    await waitFor(() => sends().length >= 2);
+    await new Promise((r) => setTimeout(r, 200));
+    const texts = sends().map((c) => c.body.text);
+    expect(texts.filter((t) => t.includes("ExtraPe key problem"))).toHaveLength(1);
+    expect(texts.filter((t) => t.includes("EarnKaro key problem"))).toHaveLength(1);
+  });
+});
+
+describe("/start and Radhe Radhe", () => {
+  it("plain /start does NOT connect the chat", async () => {
+    const res = await hook(90, 5151, "/start");
+    expect(res.status).toBe(200);
+    expect(sends()).toHaveLength(1);
+    expect(sends()[0].body.chat_id).toBe(5151);
+    expect(sends()[0].body.text).toContain("/Radhe");
+    expect(sends()[0].body.text).not.toContain("Connected");
+    expect(await (await mongo()).collection("telegram_converter_chats").findOne({ _id: "123456:5151" })).toBeNull();
+  });
+  it("/start@bot also gets the hint", async () => {
+    await hook(91, 5152, "/start@xtelgobot");
+    expect(sends()).toHaveLength(1);
+    expect(sends()[0].body.text).toContain("/Radhe");
+  });
+  for (const text of ["Radhe Radhe", "radhe   RADHE"]) {
+    it(`${JSON.stringify(text)} connects like /Radhe`, async () => {
+      const res = await hook(92, 5253, text);
+      expect(res.status).toBe(200);
+      expect(sends()).toHaveLength(1);
+      expect(sends()[0].body.text).toContain("Connected");
+      const db = await mongo();
+      expect(await db.collection("telegram_converter_chats").findOne({ _id: "123456:5253" })).toBeTruthy();
+      await db.collection("telegram_converter_chats").deleteOne({ _id: "123456:5253" });
+    });
+  }
+  it("random text from unknown chat is still ignored", async () => {
+    await hook(93, 5354, "hello https://www.flipkart.com/p/itm1");
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("checkConverterHealth takes back from a failing copy", () => {
+  const other = "https://sleeping-preview.example/api/public/telegram/converter";
+  const recent = () => Math.floor(Date.now() / 1000) - 60;
+  for (const msg of ["Wrong response from the webhook: 404 Not Found", "Wrong response from the webhook: 502 Bad Gateway", "Connection timed out", "Failed to resolve host: Name or service not known", "Connection refused"]) {
+    it(`takes back on recent ${JSON.stringify(msg)}`, async () => {
+      webhookUrl = other;
+      webhookInfo = { last_error_date: recent(), last_error_message: msg };
+      const r = await conv.checkConverterHealth();
+      expect(r).toEqual({ checked: true, restored: true });
+      const set = calls.find((c) => c.method === "setWebhook");
+      expect(set?.body.url).toBe(EXPECTED);
+    });
+  }
+  it("leaves other URL alone when its last error is older than 15 min", async () => {
+    webhookUrl = other;
+    webhookInfo = { last_error_date: Math.floor(Date.now() / 1000) - 20 * 60, last_error_message: "Wrong response from the webhook: 404 Not Found" };
+    expect(await conv.checkConverterHealth()).toEqual({ checked: true, ok: true, other_url: other });
+    expect(calls.map((c) => c.method)).toEqual(["getWebhookInfo"]);
+  });
+  it("leaves other URL alone on a recent non-network error (e.g. 400)", async () => {
+    webhookUrl = other;
+    webhookInfo = { last_error_date: recent(), last_error_message: "Wrong response from the webhook: 400 Bad Request" };
+    expect(await conv.checkConverterHealth()).toEqual({ checked: true, ok: true, other_url: other });
+    expect(calls.map((c) => c.method)).toEqual(["getWebhookInfo"]);
+  });
+});
+
+describe("notifyOwner atomic dedupe", () => {
+  it("two concurrent alerts with the same key send one message", async () => {
+    sendDelayMs = 50;
+    const results = await Promise.all([conv.notifyOwner("TEST_concurrent A", "x-cookie"), conv.notifyOwner("TEST_concurrent B", "x-cookie")]);
+    expect(results.sort()).toEqual([0, 1]);
+    expect(sends()).toHaveLength(1);
+  });
+  it("five concurrent alertIfKeyFailed calls send one message", async () => {
+    await Promise.all(Array.from({ length: 5 }, () => conv.alertIfKeyFailed("Sankmo: Invalid Token!")));
+    expect(sends()).toHaveLength(1);
+  });
+  it("alerts without a key are never deduped", async () => {
+    await conv.notifyOwner("TEST_no_key 1");
+    await conv.notifyOwner("TEST_no_key 2");
+    expect(sends()).toHaveLength(2);
   });
 });

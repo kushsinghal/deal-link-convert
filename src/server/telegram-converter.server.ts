@@ -74,6 +74,7 @@ export async function notifyOwner(text: string, alertKey?: string) {
     if (chat.type === "channel") continue;
     try { await telegramCall(token, "sendMessage", { chat_id: chat.chat_id, text }); sent++; } catch (e) { console.error("owner alert failed", (e as Error).message); }
   }
+  if (alertKey && !sent) await db.collection("converter_alerts").deleteOne({ _id: alertKey as any });
   return sent;
 }
 
@@ -169,11 +170,11 @@ export async function receiveConverter(request: Request, body: unknown) {
   const pair = text.match(/^\/(?:start|connect)(?:@\w+)?\s+(\S+)$/);
   if (RADHE.test(text.trim()) || (pair?.[1] && validPairing(pair[1], token))) {
     await chats.updateOne({ _id: chatKey as any }, { $set: { bot, chat_id: String(msg.chat.id), type: msg.chat.type, connected_at: new Date().toISOString() } }, { upsert: true });
-    if (msg.chat.type !== "channel") await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "✅ Connected. Radhe Radhe! Send your links or deal text here and I'll reply with your affiliate links." });
+    if (msg.chat.type !== "channel") await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "✅ Connected. Radhe Radhe! Send your links or deal text here and I'll reply with your affiliate links." }).catch((e) => console.error("connect reply failed", e.message));
     return Response.json({ ok: true });
   }
   if (PLAIN_START.test(text.trim()) && msg.chat.type !== "channel") {
-    await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "👋 Send /Radhe to connect this chat, then send your links or deal text." });
+    await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "👋 Send /Radhe to connect this chat, then send your links or deal text." }).catch((e) => console.error("start reply failed", e.message));
     return Response.json({ ok: true });
   }
   // Unknown chats cannot use the owner's paid affiliate credentials.

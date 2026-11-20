@@ -1,0 +1,29 @@
+{
+  "summary": "Backend-only retest of the 4 fixes from iteration 6. I added 19 vitest cases to src/test/telegram-alerts-health.test.ts, so the file now has 42 tests, all passing. The full suite passes: 105/105 (the 86 from before plus 19 new). Tests use a fake bot token, a mocked fetch (only api.telegram.org with the fake token, extrape.com and ekaro-api are allowed) and an isolated Mongo DB (dealloot_t1_isolated_test), which is dropped afterwards; I confirmed it is gone. Verified: (1) runChain alerts per converter. ExtraPe AUTH + EarnKaro success returns the EarnKaro link and sends exactly one 'extrape-key' alert. ExtraPe success sends no alert and EarnKaro is not called. ExtraPe INVALID_URL + EarnKaro success sends no alert. Both failing sends one ExtraPe alert and one EarnKaro alert. (2) Plain '/start' and '/start@bot' from a new chat get the '/Radhe' hint, and the chat is NOT stored or connected. 'Radhe Radhe' and 'radhe   RADHE' connect. Random text from an unknown chat is still ignored. (3) checkConverterHealth takes the webhook back (setWebhook to the expected URL) from another URL when that URL had a recent error: 404, 502, timed out, resolve or connection refused. It leaves the other URL alone when the error is older than 15 min, or when the recent error is a 400. (4) notifyOwner dedupe: 2 concurrent notifyOwner calls with the same key return [0,1] and send 1 message. 5 concurrent alertIfKeyFailed calls send 1 message. Calls without a key are never deduped. Live check: an unsigned POST of '/start' to the public webhook returns 401. The real bot was not messaged, and setWebhook/deleteWebhook were never called on the real token.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "notifyOwner", "issue": "Still not fixed from iteration 6 (was optional): the 6h alert slot is saved BEFORE sending. If there are no connected chats or every sendMessage fails, the alert is still suppressed for 6h. Consider deleting or resetting the converter_alerts entry when sent === 0."},
+      {"endpoint": "receiveConverter (/start hint and /Radhe reply)", "issue": "These replies use a separate telegramCall sendMessage. If it throws (user blocked the bot, Telegram error), receiveConverter throws, the webhook returns 500 and Telegram keeps retrying the update. Consider catching the error, or returning the reply in the webhook response as the link flow already does."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/src/test/telegram-alerts-health.test.ts"],
+  "action_items": [
+    "Optional: in notifyOwner, release the dedupe slot when sent === 0, so a failed alert is retried sooner than 6h.",
+    "Optional: wrap the /start-hint and /Radhe-connected sendMessage in try/catch (or reply via the webhook response) to avoid 500 retry loops."
+  ],
+  "critical_code_review_comments": [
+    "runChain: alertIfKeyFailed is fire-and-forget per failed converter. The Telegram flow (line 229) and safeConvert call it again with the combined error. The atomic dedupe makes this safe; verified only one message per key.",
+    "Atomic dedupe relies on updateOne({_id, at<=cutoff}, upsert) raising E11000 when a recent entry exists. This is correct because the filter is not a pure _id equality, so Mongo does not retry the upsert.",
+    "The checkConverterHealth failing regex /404|5\\d\\d|timeout|timed out|connection|resolve/ is fairly broad, but it is limited to errors from the last 15 min on a URL that is not ours. That is acceptable.",
+    "engine.server.ts (841 lines) and core.server.ts (>700 lines) exceed the 700-line guideline."
+  ],
+  "updated_files": ["/app/src/test/telegram-alerts-health.test.ts"],
+  "success_rate": {"backend": "100% (105/105 vitest, including 42/42 in telegram-alerts-health)", "frontend": "not tested (backend only)"},
+  "seed_data_creation": "None in dealloot_preview. All test data was in dealloot_t1_isolated_test, which was dropped afterwards.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: npx vitest run (105 tests). telegram-alerts-health.test.ts sets DB_NAME=dealloot_t1_isolated_test and deletes EXTRAPE_SESSION_SECRET, so settings.extrape_token is under test control. Its fetch stub has knobs: webhookUrl, webhookInfo (last_error_date/message), sendDelayMs (for concurrency), extrapeReply, earnkaroReply. No helper scripts were left in /app/scripts. Do not message real chat 1089828186, and do not call setWebhook/deleteWebhook on the real token.",
+  "rca of the issue": "All 4 minor issues from iteration 6 were verified as fixed, except the optional 'record slot only after a successful send' part of the notifyOwner item."
+}
