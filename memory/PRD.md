@@ -96,3 +96,10 @@
 - Public: Control Room nav hidden until /admin login; share + original-post buttons removed; source names hidden (and stripped from public /deals API); /deals/:id/original admin-only; price history label "Seen on DealLoot".
 - Social/WhatsApp/nitter/x links no longer ingested as deals.
 - Tests: vitest 57/57; testing agent iteration_5 all pass.
+
+## 2026-11-20 (fork 3) — Converter speed, false key alert, logout
+- Bot now replies BEFORE the slow product lookup/deal save (runs in background via `lastBackground`); multiple links convert in parallel. Link conversion itself measured 0.7–1.5s live.
+- ExtraPe errors split: INVALID_AUTH_TOKEN (real expired key, alerts owner) vs INVALID_URL (unsupported link, no alert). The 7:15 PM alert was a false alarm from a background import; key verified working live.
+- Navbar "Log out" button (data-testid admin-logout-button) shown only when signed in; old small Sign out link removed.
+- Vitest 57/57, tsc clean. Real Telegram round-trip timing NOT measured by agent (would message the owner's chat).
+- Backlog: Twitter/X API instead of Nitter (P1); social-link filter expansion (wa.me, facebook, threads, telegram.dog) (P2).

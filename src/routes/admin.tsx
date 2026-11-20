@@ -35,22 +35,9 @@ function AdminGate() {
     return () => window.removeEventListener("dealloot-auth", sync);
   }, []);
 
-  const signOut = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    window.dispatchEvent(new Event("dealloot-auth"));
-    setToken(null);
-  };
-
   if (token === undefined) return <main className="mx-auto max-w-7xl px-4 py-16 text-sm text-slate-500">Loading…</main>;
   if (!token) return <SignIn onDone={setToken} />;
-  return (
-    <>
-      <div className="mx-auto flex max-w-7xl justify-end px-4 pt-4 sm:px-8">
-        <button data-testid="admin-sign-out" className="text-xs font-semibold text-slate-500 underline" onClick={signOut}>Sign out</button>
-      </div>
-      <AdminPage />
-    </>
-  );
+  return <AdminPage />;
 }
 
 function SignIn({ onDone }: { onDone: (t: string) => void }) {

@@ -47,7 +47,7 @@ export async function telegramCall(token: string, method: string, body: Record<s
 }
 
 const RADHE = /^(?:\/radhe(?:@\w+)?|@radhe|radhe)$/i;
-const EXTRAPE_KEY_ERROR = /ExtraPe conversion was rejected|ExtraPe returned no converted link|Add your ExtraPe access token/i;
+const EXTRAPE_KEY_ERROR = /ExtraPe access token expired or invalid|Add your ExtraPe access token/i;
 const botId = (token: string) => token.split(":")[0];
 
 async function connectedChats(token: string) {
@@ -75,7 +75,7 @@ export async function notifyOwner(text: string, alertKey?: string) {
 
 export async function alertIfExtraPeKeyFailed(error: string | null | undefined) {
   if (!error || !EXTRAPE_KEY_ERROR.test(error)) return;
-  await notifyOwner("⚠️ ExtraPe key problem: your links are NOT being converted to your ExtraPe links.\n\nYour ExtraPe access token has probably expired. Log in to extrape.com, copy the new token and update it in Control Room → Affiliate Setup.\n\nDetail: " + error.slice(0, 300), "extrape-key");
+  await notifyOwner("⚠️ ExtraPe key problem: your links are NOT being converted to your ExtraPe links.\n\nExtraPe says your access token is expired or invalid. Log in to extrape.com, copy the new token and update it in Control Room → Affiliate Setup.\n\nDetail: " + error.slice(0, 300), "extrape-key");
 }
 
 /** Run by the scheduler: re-registers the webhook if Telegram lost it and tells the owner. */
@@ -134,6 +134,9 @@ export async function disconnectConverter() {
   return { connected: false };
 }
 
+/** Lets tests wait for the post-reply work. */
+export let lastBackground: Promise<void> = Promise.resolve();
+
 export async function receiveConverter(request: Request, body: unknown) {
   const settings = await getSettings();
   const token = settings.telegram_converter_token;
@@ -175,10 +178,6 @@ export async function receiveConverter(request: Request, body: unknown) {
   const messageAt = typeof (msg as any).date === "number" ? (msg as any).date * 1000 : receivedAt;
   try {
     const result = await convertAffiliateText(text, settings, msg.entities || msg.caption_entities || []);
-    for (const item of result.items) {
-      if (item.error || !item.changed) continue;
-      await publishConversion({ original: item.original, cleaned: item.cleaned, converted: item.converted, error: null, text, settings, source: "Telegram converter" });
-    }
     if (result.items.length) {
       // Do not label a failed conversion as an earning link or modify the channel post on failure.
       if (result.items.some((i) => i.error)) {
@@ -195,13 +194,19 @@ export async function receiveConverter(request: Request, body: unknown) {
       }
     }
     const repliedAt = Date.now();
-    if (result.items.length) {
+    await updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } });
+    // The reply is already sent; saving the deal (slow product lookup) and logging must not delay it.
+    lastBackground = (async () => {
+      if (!result.items.length) return;
       await db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, store: i.store, original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted,
         status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error, message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: new Date(repliedAt).toISOString(),
         convert_ms: repliedAt - receivedAt, total_ms: Math.max(0, repliedAt - messageAt) })));
       for (const i of result.items) await alertIfExtraPeKeyFailed(i.error);
-    }
-    await updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } });
+      for (const item of result.items) {
+        if (item.error || !item.changed) continue;
+        await publishConversion({ original: item.original, cleaned: item.cleaned, converted: item.converted, error: null, text, settings, source: "Telegram converter" });
+      }
+    })().catch((e) => console.error("converter background work failed", e?.message));
     return Response.json({ ok: true });
   } catch (error) {
     await updates.updateOne({ _id: key }, { $set: { locked_until: 0 } });

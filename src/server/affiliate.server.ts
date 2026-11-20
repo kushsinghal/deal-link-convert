@@ -38,8 +38,7 @@ export async function convertAffiliateText(text: string, settings: any, entities
   });
   const linkEntities = entities.filter((e) => e.type === "text_link" && e.url);
   const urls = [...new Set([...spans.map((s) => s.url), ...linkEntities.map((e) => e.url!)])];
-  const items = [];
-  for (const url of urls) items.push(await convertAffiliate(url, settings));
+  const items = await Promise.all(urls.map((url) => convertAffiliate(url, settings)));
   const byUrl = new Map(items.map((i) => [i.original, i]));
 
   let message = "";

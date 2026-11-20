@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { getToken } from "@/lib/api";
-import { Zap, LayoutDashboard, Flame, BookOpen } from "lucide-react";
+import { getToken, TOKEN_KEY } from "@/lib/api";
+import { Zap, LayoutDashboard, Flame, BookOpen, LogOut } from "lucide-react";
+
+const logout = () => {
+  window.localStorage.removeItem(TOKEN_KEY);
+  window.dispatchEvent(new Event("dealloot-auth"));
+};
 
 const base = "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors duration-200";
 const active = "bg-slate-900 text-white";
@@ -40,6 +45,9 @@ export const Navbar = () => {
         {admin && <Link to="/admin" aria-label="Control Room" className={base} activeProps={{ className: active }} inactiveProps={{ className: idle }} data-testid="admin-dashboard-nav-link">
           <LayoutDashboard className="h-4 w-4" /> <span className="hidden sm:inline">Control Room</span>
         </Link>}
+        {admin && <button type="button" onClick={logout} aria-label="Log out" className={`${base} border border-slate-300 text-slate-700 hover:bg-red-50 hover:text-red-700`} data-testid="admin-logout-button">
+          <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Log out</span>
+        </button>}
       </nav>
     </div>
   </header>

@@ -614,7 +614,10 @@ async function convertWithExtraPe(url: string, settings: any) {
   try { data = raw ? JSON.parse(raw) : {}; } catch { data = { data: raw }; }
   if (!r.ok || data?.errorCode || data?.success === false || data?.errorMessage) {
     if (/amazon.*(?:program|tag|associate)/i.test(data?.errorMessage || "")) throw new Error("ExtraPe: Amazon conversion requires approval for ExtraPe's Amazon program or your own Amazon Associates tag in ExtraPe. No earning link was created.");
-    throw new Error(`ExtraPe conversion was rejected (${data?.errorCode || r.status}). Check account permissions and the product link; the token may need renewing.`);
+    const code = String(data?.errorCode || r.status);
+    if (/AUTH|TOKEN|LOGIN|SESSION|^401$|^403$/i.test(code) || /not logged in|please login/i.test(data?.errorMessage || "")) throw new Error(`ExtraPe access token expired or invalid (${code}). Log in to extrape.com and update the token.`);
+    if (/INVALID.?URL/i.test(code)) throw new Error("ExtraPe does not support this link (INVALID_URL). Your ExtraPe key is fine; this store or link type cannot be converted.");
+    throw new Error(`ExtraPe conversion was rejected (${code}). Check account permissions and the product link.`);
   }
   const payload = data?.convertedText ?? data?.outputText ?? data?.data;
   let output = typeof payload === "string" ? payload : "";
