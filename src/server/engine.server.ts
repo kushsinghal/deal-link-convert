@@ -309,6 +309,7 @@ export async function fetchTelegram(username: string) {
   const msgs = root.querySelectorAll("div.tgme_widget_message");
   if (!msgs.length) {
     if (root.querySelector(".tgme_channel_info_header")) return [];
+    if (root.querySelector(".tgme_page_extra")) throw new Error(`@${username}: channel exists, but its owner has turned off Telegram's public web preview, so posts cannot be read without joining. Use a different source or ask the owner to enable it.`);
     throw new Error(`@${username}: public preview unavailable. Check the channel name and whether it is public.`);
   }
   const items: any[] = [];
