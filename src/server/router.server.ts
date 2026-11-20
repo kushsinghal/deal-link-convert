@@ -94,6 +94,21 @@ export async function handle(request: Request, splat: string) {
       if (c === "status") return json(await telegram.converterStatus());
       if (c === "disconnect") return json(await telegram.disconnectConverter());
     }
+    if (a === "sankmo-bot") {
+      const bot = await import("./sankmo-bot.server");
+      try {
+        if (method === "GET" && b === "status") return json(await bot.botStatus());
+        if (method === "POST" && b === "send-code") return json(await bot.sendLoginCode(body.phone));
+        if (method === "POST" && b === "verify") return json(await bot.verifyLoginCode(body.code, body.password));
+        if (method === "POST" && b === "disconnect") return json(await bot.disconnectBot());
+      } catch (e) { return json({ detail: String(e?.message || e).slice(0, 300) }, 400); }
+    }
+    if (method === "POST" && a === "x" && b === "test") {
+      try {
+        const items = await (await import("./x-feed.server")).fetchX(String(body.username || ""), true);
+        return json({ posts: items.length, sample: items.slice(0, 3).map((i: any) => ({ text: i.text.slice(0, 200), links: i.links, image: i.image, posted_at: i.posted_at })) });
+      } catch (e) { return json({ detail: String(e?.message || e).slice(0, 300) }, 400); }
+    }
     if (method === "GET") {
       if (a === "lookup") return json(await core.lookup(qp("url") || ""));
       if (a === "review-deals") return json(await (await import("./review.server")).reviewDeals());

@@ -111,3 +111,10 @@
 - Fork 3 part 4: bot now REMOVES links that are not converted (non-shop links and failed shop links such as Amazon); a line holding only such a link is dropped; normal text untouched; hidden text_link entities for those are dropped. Follow-up message lists removed failed shop links. Vitest 59/59.
 - Twitter/X API not built: needs a paid official X API plan or a third-party scraper key (user to decide).
 - Moving to another Emergent account: Save to GitHub -> Import from GitHub; DB data and secrets do not transfer automatically.
+
+## 2026-11-20 (fork) — Sankmo bot, converter order, feed backups + X API
+- Converter order setting `converter_order` (default ExtraPe → EarnKaro → Sankmo), admin "Converter order" panel. Amazon skips Sankmo. Explicit per-store route goes first.
+- Sankmo via @sankmo_bot (gramjs userbot): `src/server/sankmo-bot.server.ts`, admin endpoints `/sankmo-bot/{status,send-code,verify,disconnect}`; session stored in settings.tg_session (never sent to browser). Env: TELEGRAM_API_ID, TELEGRAM_API_HASH. User must still log in (phone + code) in admin.
+- Feed backups: `src/server/x-feed.server.ts` — main → up to 5 custom backup RSS → 5 auto Nitter mirrors → X API (X_BEARER_TOKEN, max once/30 min per account, since_id). New source kind "x". Source fields backup_urls, x_username, last_via. `/x/test` endpoint + UI.
+- Sankmo token API returns "Invalid Token!" (token API not usable). X_BEARER_TOKEN saved is a 40-char value → X returns 401; needs the app Bearer Token (~110 chars, starts with AAAA).
+- Backlog: admin Telegram alert when converter keys expire (P1); social-link ingest filter (P2); converter-logs NaN limit (P2).

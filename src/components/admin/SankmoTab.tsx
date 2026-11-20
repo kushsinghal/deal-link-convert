@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Panel, fieldCls, primaryBtn, ghostBtn } from "./Panel";
 import { TelegramConverterPanel } from "./TelegramConverterPanel";
+import { SankmoBotPanel, ConverterOrderPanel } from "./SankmoBotPanel";
 
 const Tester = () => {
   const [url, setUrl] = useState("");
@@ -109,7 +110,7 @@ export const SankmoTab = () => {
   );
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-    <Panel testid="sankmo-panel" title="Affiliate links" desc="ExtraPe converts links by default. EarnKaro stays as a backup.">
+    <Panel testid="sankmo-panel" title="Affiliate links" desc="Add your converter tokens. The order they are tried in is set in Converter order.">
         <div className="space-y-5">
           <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
             <Label className="text-xs text-slate-700">ExtraPe access token {s.extrape_token_masked && <span data-testid="extrape-token-saved" className="font-mono text-emerald-700">· saved {s.extrape_token_masked}</span>}</Label>
@@ -125,7 +126,7 @@ export const SankmoTab = () => {
           <div className="flex flex-wrap gap-2">{modeBtn("sankmo_api", "Sankmo API token")}{modeBtn("api", "Custom Sankmo API")}</div>
           {s.convert_mode === "sankmo_api" ? (
               <p data-testid="sankmo-api-help" className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-3 text-xs text-slate-700">
-              This version already has a Sankmo converter address configured. Paste your Sankmo token below and test a link. Sankmo’s public pages do not document this token/API flow, so ask Sankmo support for the correct token type if testing fails.
+              Sankmo converts best through your Telegram login below (@sankmo_bot). The token here is only used when Telegram is not connected.
             </p>
           ) : s.convert_mode === "telegram" ? <TelegramConnect s={s} reload={load} /> : (
             <div><Label className="text-xs text-slate-600">Converter API URL</Label>
@@ -144,6 +145,8 @@ export const SankmoTab = () => {
           <Button data-testid="sankmo-save-button" className={primaryBtn} onClick={() => save()}>Save</Button>
         </div>
       </Panel>
+      <ConverterOrderPanel s={s} setS={setS} />
+      <SankmoBotPanel />
       <Tester />
       <StoresPanel s={s} setS={setS} />
       <TelegramConverterPanel settings={s} reload={load} />

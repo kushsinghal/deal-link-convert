@@ -1,4 +1,4 @@
-import * as engine from "./engine.server";
+import { fetchSourceItems } from "./x-feed.server";
 import { mongo } from "./db.server";
 import { normalizeSource } from "./source-input.server";
 
@@ -11,8 +11,9 @@ export async function testSource(id: string) {
   let result;
   try {
     const value = normalizeSource(source.kind, source.value);
-    const items = source.kind === "telegram" ? await engine.fetchTelegram(value) : source.kind === "rss" ? await engine.fetchRss(value) : await engine.fetchWeb(value);
-    result = { status: items.length ? "ok" : "empty", posts: items.length, message: items.length ? `${items.length} posts readable. No deals imported or sent.` : "Source loaded, but no readable posts were found.", checked_at, latency_ms: Date.now() - start };
+    const { items, via } = await fetchSourceItems({ ...source, value });
+    const from = via ? ` (main failed, read from backup ${via})` : "";
+    result = { status: items.length ? "ok" : "empty", posts: items.length, via, message: items.length ? `${items.length} posts readable${from}. No deals imported or sent.` : `Source loaded${from}, but no readable posts were found.`, checked_at, latency_ms: Date.now() - start };
   } catch (e) {
     result = { status: "error", posts: 0, message: String(e instanceof Error ? e.message : "Could not read source").slice(0, 300), checked_at, latency_ms: Date.now() - start };
   }

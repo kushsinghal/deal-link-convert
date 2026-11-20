@@ -12,8 +12,13 @@ export function normalizeTelegram(input: string) {
 }
 
 export function normalizeSource(kind: string, input: string) {
-  if (!["rss", "telegram", "web"].includes(kind)) throw new Error("Choose Telegram, RSS feed, or Website page.");
+  if (!["rss", "telegram", "web", "x"].includes(kind)) throw new Error("Choose Telegram, RSS feed, Website page or X account.");
   if (kind === "telegram") return normalizeTelegram(input);
+  if (kind === "x") {
+    const u = input.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, "").split(/[/?#]/)[0] || "";
+    if (!/^[A-Za-z0-9_]{1,15}$/.test(u)) throw new Error("Enter an X username like @dealsindia");
+    return u;
+  }
   let url: URL;
   try { url = new URL(input.trim()); } catch { throw new Error("Enter a full https:// source URL."); }
   if (!["https:", "http:"].includes(url.protocol) || url.username || url.password || url.port || /^(localhost|.*\.local|.*\.internal|\[.*\]|\d+\.\d+\.\d+\.\d+)$/.test(url.hostname)) throw new Error("Use a public HTTP or HTTPS source URL without login credentials.");

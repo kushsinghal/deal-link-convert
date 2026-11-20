@@ -586,7 +586,7 @@ export function missingTokenError(route: string, settings: any) {
   return null;
 }
 
-async function convertWithSankmo(url: string, settings: any) {
+async function convertWithSankmoToken(url: string, settings: any) {
   const r = await fetch("https://sankmo.in/api/convertMunafaLinks", {
     method: "POST", body: new URLSearchParams({ text: url }), headers: { Authorization: `Bearer ${(settings.sankmo_token || "").trim()}` }, signal: AbortSignal.timeout(20000),
   });
@@ -596,17 +596,62 @@ async function convertWithSankmo(url: string, settings: any) {
   throw new Error(`Sankmo: ${data?.msg || "no converted link returned"}`);
 }
 
-// ExtraPe first, then Sankmo, then EarnKaro: each backup is used only when it has a token and the one before failed.
-async function convertWithDefault(url: string, settings: any) {
-  const has = (k: string) => !!(settings[k] || "").trim();
-  const chain: [string, (u: string, s: any) => Promise<string>][] = [];
-  if (has("extrape_token")) chain.push(["ExtraPe", convertWithExtraPe]);
-  if (has("sankmo_token")) chain.push(["Sankmo backup", convertWithSankmo]);
-  if (has("earnkaro_token")) chain.push(["EarnKaro backup", convertWithEarnKaro]);
+async function convertWithSankmoApi(url: string, settings: any) {
+  const api = settings.sankmo_api_url.trim(), token = (settings.sankmo_token || "").trim();
+  const r = api.includes("{url}")
+    ? await fetch(api.replace("{url}", encodeURIComponent(url)).replace("{token}", token), { signal: AbortSignal.timeout(15000) })
+    : await fetch(api, { method: "POST", body: JSON.stringify({ url, link: url, token }), signal: AbortSignal.timeout(15000),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "X-API-Key": token } });
+  if (!r.ok) throw new Error(`Sankmo converter failed (${r.status})`);
+  const raw = await r.text();
+  let data: any;
+  try { data = JSON.parse(raw); } catch {
+    const f = findUrls(raw).find((candidate) => candidate !== url);
+    if (f) return f;
+    throw new Error("Sankmo returned no earning link");
+  }
+  for (const key of ["converted_url", "short_url", "shortUrl", "affiliate_url", "earn_link", "link", "url", "data", "result"]) {
+    let v = data && typeof data === "object" ? data[key] : null;
+    if (v && typeof v === "object") v = Object.values(v).find((x) => typeof x === "string" && x.startsWith("http"));
+    if (typeof v === "string") {
+      const candidate = findUrls(v).find((link) => link !== url);
+      if (candidate) return candidate;
+    }
+  }
+  throw new Error("Sankmo returned no earning link");
+}
+
+// Sankmo: Telegram bot login first, otherwise the custom API or token.
+async function convertWithSankmo(url: string, settings: any) {
+  if (settings.tg_session) return (await import("./sankmo-bot.server")).convertViaSankmoBot(url);
+  if (settings.convert_mode === "api" && (settings.sankmo_api_url || "").trim()) return convertWithSankmoApi(url, settings);
+  return convertWithSankmoToken(url, settings);
+}
+
+const has = (s: any, k: string) => !!String(s[k] || "").trim();
+const CONVERTERS: Record<string, [string, (u: string, s: any) => Promise<string>, (s: any) => boolean]> = {
+  extrape: ["ExtraPe", (u, s) => convertWithExtraPe(u, s), (s) => has(s, "extrape_token")],
+  earnkaro: ["EarnKaro", (u, s) => convertWithEarnKaro(u, s), (s) => has(s, "earnkaro_token")],
+  sankmo: ["Sankmo", convertWithSankmo, (s) => !!s.tg_session || has(s, "sankmo_token") || (s.convert_mode === "api" && has(s, "sankmo_api_url"))],
+};
+export const DEFAULT_CONVERTER_ORDER = ["extrape", "earnkaro", "sankmo"];
+
+export function converterChain(settings: any, preferred?: string) {
+  const saved = Array.isArray(settings.converter_order) ? settings.converter_order.filter((k: string) => k in CONVERTERS) : [];
+  let order = [...new Set([...saved, ...DEFAULT_CONVERTER_ORDER])];
+  if (preferred && preferred in CONVERTERS) order = [preferred, ...order.filter((k) => k !== preferred)];
+  return order.filter((k) => CONVERTERS[k][2](settings));
+}
+
+async function runChain(url: string, settings: any, chain: string[]) {
   if (!chain.length) throw new Error("Add your ExtraPe access token in Affiliate links settings");
   const errors: string[] = [];
-  for (const [name, fn] of chain) {
-    try { return await fn(url, settings); } catch (e) { errors.push(errors.length ? `${name}: ${e?.message || "conversion failed"}` : e?.message || `${name} conversion failed`); }
+  for (const key of chain) {
+    const [name, fn] = CONVERTERS[key];
+    try { return await fn(url, settings); } catch (e) {
+      const msg = e?.message || `${name} conversion failed`;
+      errors.push(errors.length && !msg.startsWith(name) ? `${name} backup: ${msg}` : msg);
+    }
   }
   throw new Error(errors.join("; "));
 }
@@ -639,56 +684,12 @@ async function convertWithExtraPe(url: string, settings: any) {
 
 export async function convertLink(url: string, settings: any) {
   if (settings.convert_enabled === false || isDealSite(url)) return url;
-  const route = affiliateRoute(detectStore(url), settings);
+  const store = detectStore(url);
+  const route = affiliateRoute(store, settings);
   if (route === "original") return url;
-  if (route === "extrape") return convertWithDefault(url, settings);
-  if (route === "earnkaro") return convertWithEarnKaro(url, settings);
-  const mode = settings.convert_mode || "sankmo_api";
-  if (mode === "telegram") return convertWithDefault(url, settings);
-  const token = (settings.sankmo_token || "").trim();
-  if (mode === "sankmo_api") {
-    if (!token) return convertWithDefault(url, settings);
-    try {
-      return await convertWithSankmo(url, settings);
-    } catch (e) {
-      try {
-        return await convertWithDefault(url, { ...settings, sankmo_token: "" });
-      } catch (fallbackError) {
-        throw new Error(`${e?.message || "Sankmo conversion failed"}; fallback: ${fallbackError?.message || "conversion failed"}`);
-      }
-    }
-  }
-  const api = (settings.sankmo_api_url || "").trim();
-  if (!api || !token) return convertWithDefault(url, settings);
-  try {
-    const r = api.includes("{url}")
-      ? await fetch(api.replace("{url}", encodeURIComponent(url)).replace("{token}", token), { signal: AbortSignal.timeout(15000) })
-      : await fetch(api, { method: "POST", body: JSON.stringify({ url, link: url, token }), signal: AbortSignal.timeout(15000),
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "X-API-Key": token } });
-    if (!r.ok) throw new Error(`Sankmo converter failed (${r.status})`);
-    const raw = await r.text();
-    let data: any;
-    try { data = JSON.parse(raw); } catch {
-      const f = findUrls(raw).find((candidate) => candidate !== url);
-      if (f) return f;
-      throw new Error("Sankmo returned no earning link");
-    }
-    for (const key of ["converted_url", "short_url", "shortUrl", "affiliate_url", "earn_link", "link", "url", "data", "result"]) {
-      let v = data && typeof data === "object" ? data[key] : null;
-      if (v && typeof v === "object") v = Object.values(v).find((x) => typeof x === "string" && x.startsWith("http"));
-      if (typeof v === "string") {
-        const candidate = findUrls(v).find((link) => link !== url);
-        if (candidate) return candidate;
-      }
-    }
-    throw new Error("Sankmo returned no earning link");
-  } catch (e) {
-    try {
-      return await convertWithDefault(url, settings);
-    } catch (fallbackError) {
-      throw new Error(`${e?.message || "Sankmo conversion failed"}; fallback: ${fallbackError?.message || "conversion failed"}`);
-    }
-  }
+  if (store === "Amazon") return runChain(url, settings, converterChain(settings, route).filter((k) => k !== "sankmo"));
+  const explicit = settings.affiliate_routes?.[store];
+  return runChain(url, settings, converterChain(settings, explicit && explicit !== "extrape" ? route : undefined));
 }
 
 async function convertWithEarnKaro(url: string, settings: any) {

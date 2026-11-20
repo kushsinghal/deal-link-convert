@@ -36,7 +36,7 @@ const DEFAULT_SETTINGS = {
   earnkaro_token: "", extrape_token: "", amazon_route: "extrape", affiliate_routes: {}, telegram_converter_token: "", telegram_converter_username: "", telegram_converter_url: "", telegram_converter_connected: false,
   check_interval_minutes: 5, check_interval_seconds: 300, post_style: "simple", max_posts_per_update: 20,
   website_max_age_hours: 24, telegram_max_age_minutes: 60, last_run_at: null,
-  copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
+  copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
 };
 
 async function check(res: any) {
@@ -298,9 +298,9 @@ function splitPost(parsed: any, text: string, links: string[], settings: any) {
 export async function fetchSource(src: any, runId?: string | null) {
   const db = await getDb();
   const settings = await getSettings();
-  let items;
+  let items, via = null;
   try {
-    items = src.kind === "telegram" ? await engine.fetchTelegram(src.value) : src.kind === "web" ? await engine.fetchWeb(src.value) : await engine.fetchRss(src.value);
+    ({ items, via } = await (await import("./x-feed.server")).fetchSourceItems(src));
   } catch (e) {
     const err = String(e?.message || e).slice(0, 300);
     await db.from("sources").update({ last_error: err, last_fetched_at: now() }).eq("id", src.id);
@@ -336,7 +336,7 @@ export async function fetchSource(src: any, runId?: string | null) {
     }
   }
   const error = itemErrors.length ? `${itemErrors.length} deal${itemErrors.length === 1 ? "" : "s"} failed: ${itemErrors[0]}` : null;
-  await db.from("sources").update({ last_fetched_at: now(), last_error: error, total_deals: (src.total_deals || 0) + added }).eq("id", src.id);
+  await db.from("sources").update({ last_fetched_at: now(), last_error: error, last_via: via, total_deals: (src.total_deals || 0) + added }).eq("id", src.id);
   return { fetched: items.length, new_deals: added, error };
 }
 
@@ -628,7 +628,7 @@ export async function addSource(body: any) {
   try { value = normalizeSource(kind, value); } catch (e) { throw new HttpError(400, e.message); }
   const dup = await check(await db.from("sources").select("id").ilike("value", value.replace(/[%_]/g, "\\$&")).limit(1));
   if (dup.length) throw new HttpError(400, "Source already added");
-  const name = body.name || (kind === "telegram" ? `@${value}` : value.replace(/^https?:\/\/(www\.)?/, "").split("/")[0] + (kind === "web" ? " (website)" : ""));
+  const name = body.name || (kind === "telegram" ? `@${value}` : kind === "x" ? `@${value} (X)` : value.replace(/^https?:\/\/(www\.)?/, "").split("/")[0] + (kind === "web" ? " (website)" : ""));
   return check(await db.from("sources").insert({ id: uuid(), created_at: now(), name, kind, value, enabled: body.enabled !== false }).select("*").single());
 }
 
@@ -637,6 +637,16 @@ export async function updateSource(id: string, body: any) {
   const patch: any = {};
   if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
   if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 160);
+  if (body.backup_urls !== undefined) {
+    const list = (Array.isArray(body.backup_urls) ? body.backup_urls : String(body.backup_urls || "").split(/\s+/)).map((u: any) => String(u).trim()).filter(Boolean);
+    if (list.length > 5) throw new HttpError(400, "Add up to 5 backup feeds");
+    try { patch.backup_urls = list.map((u: string) => normalizeSource("rss", u)); } catch (e) { throw new HttpError(400, `Backup feed: ${e.message}`); }
+  }
+  if (body.x_username !== undefined) {
+    const u = String(body.x_username || "").trim().replace(/^@/, "");
+    if (u && !/^[A-Za-z0-9_]{1,15}$/.test(u)) throw new HttpError(400, "Enter a valid X username");
+    patch.x_username = u;
+  }
   const row = await check(await db.from("sources").update(patch).eq("id", id).select("*").maybeSingle());
   if (!row) throw new HttpError(404, "Source not found");
   return row;
@@ -721,7 +731,7 @@ export async function sendRecent(id: string) {
 
 export function adminSettingsView(s: any) {
   const { sankmo_token, earnkaro_token, extrape_token, telegram_converter_token, amazon_tag, tg_session, tg_api_hash, ...rest } = s;
-  return { ...rest, sankmo_token_masked: mask(sankmo_token || ""), earnkaro_token_masked: mask(earnkaro_token || ""), extrape_token_masked: mask(extrape_token || ""), telegram_converter_token_masked: mask(telegram_converter_token || ""), tg_connected: false, tg_api_hash_masked: "" };
+  return { ...rest, sankmo_token_masked: mask(sankmo_token || ""), earnkaro_token_masked: mask(earnkaro_token || ""), extrape_token_masked: mask(extrape_token || ""), telegram_converter_token_masked: mask(telegram_converter_token || ""), tg_connected: !!tg_session, tg_api_hash_masked: "" };
 }
 
 export async function readSettings() {
@@ -737,6 +747,7 @@ export async function writeSettings(body: any) {
   if ("amazon_route" in upd && !["extrape", "earnkaro"].includes(upd.amazon_route)) throw new HttpError(400, "Amazon must use ExtraPe or EarnKaro");
   for (const k of ["telegram_converter_username", "telegram_converter_url", "telegram_converter_connected"]) delete upd[k];
   if (upd.telegram_converter_token === "") delete upd.telegram_converter_token;
+  if ("converter_order" in upd && (!Array.isArray(upd.converter_order) || [...upd.converter_order].sort().join() !== [...engine.DEFAULT_CONVERTER_ORDER].sort().join())) throw new HttpError(400, "Converter order must list ExtraPe, EarnKaro and Sankmo once each");
   if ("converter_label_style" in upd && !(["store", "link"] as string[]).includes(upd.converter_label_style)) throw new HttpError(400, "Label style must be store or link");
   if ("telegram_converter_token" in upd) {
     upd.telegram_converter_token = String(upd.telegram_converter_token).trim();
