@@ -120,3 +120,12 @@
 - Backlog: admin Telegram alert when converter keys expire (P1); social-link ingest filter (P2); converter-logs NaN limit (P2).
 - 2026-11-20: X backup switched to spare-account login cookies (X_AUTH_TOKEN + X_CT0) via @the-convocation/twitter-scraper; official X_BEARER_TOKEN only used if it starts with "AAAA" (the saved X_BEARER_TOKEN is the user's main-account cookie and is ignored). Throttled reads return [] (no error). Verified: 5–7 live posts read in ~1s.
 - 2026-11-20: Expired-key Telegram alerts (ExtraPe/EarnKaro/Sankmo/X cookies, once per 6h each, also fire when a backup converter succeeds). /start hint reply, "Radhe Radhe" accepted. Webhook health check no longer steals the bot from another site copy unless that copy is failing (404/5xx). /Radhe no reply root cause: preview URL slept → Telegram got 404. Fix: deploy and press Connect bot on the live site.
+
+## 2026-06 session — deployment
+- Fork lacked backend/.env, frontend/.env and root node_modules (preview frontend FATAL). Recreated env files (MONGO_URL, DB_NAME=dealloot_preview, NODE_INTERNAL_URL=http://127.0.0.1:3000, ADMIN_PASSWORD user-chosen, SESSION_SECRET generated), ran root yarn install. Preview + production build verified.
+- EXTRAPE_SESSION_SECRET (ExtraPe accessToken cookie) re-added via secure card; LIVE Flipkart conversion verified (fkrt.co).
+- Deployment readiness passed; first Emergent deploy dispatched (requested subdomain dealloot.emergent.host). Custom .in/.com domain not yet bought.
+- DB has 0 sources/deals — user to provide source list.
+## Backlog
+- P0: add user's sources; connect purchased custom domain (dealloot.in) after deploy.
+- P1: Telegram destinations; scheduled scan cron.
