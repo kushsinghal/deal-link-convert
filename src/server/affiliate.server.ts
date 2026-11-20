@@ -63,16 +63,25 @@ export async function convertAffiliateText(text: string, settings: any, entities
   let cursor = 0;
   const replacements: Replacement[] = [];
   const labelEntities: Entity[] = [];
+  const dropped = (item: any) => !!item.error || (!item.changed && !item.own);
   for (const span of spans) {
-    message += text.slice(cursor, span.start);
     const item = byUrl.get(span.url)!;
-    const keep = !!item.error || (!item.changed && !(item as any).own);
-    const shown: string = keep ? span.raw : settings?.converter_label_style === "link" ? item.converted ?? span.url : linkLabel(item.store);
+    const drop = dropped(item);
+    let { start, end } = span;
+    if (drop) {
+      // A link that is not yours is removed; if it was alone on its line the empty line goes too.
+      const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+      const nl = text.indexOf("\n", end);
+      const lineEnd = nl < 0 ? text.length : nl;
+      if (lineStart >= cursor && !text.slice(lineStart, start).trim() && !text.slice(end, lineEnd).trim()) { start = lineStart; end = nl < 0 ? lineEnd : lineEnd + 1; }
+    }
+    message += text.slice(cursor, start);
+    const shown: string = drop ? "" : settings?.converter_label_style === "link" ? item.converted ?? span.url : linkLabel(item.store);
     const newStart = message.length;
     message += shown;
-    replacements.push({ start: span.start, end: span.end, newStart, newEnd: message.length });
-    if (!keep) labelEntities.push({ type: "text_link", offset: newStart, length: shown.length, url: item.converted });
-    cursor = span.end;
+    replacements.push({ start, end, newStart, newEnd: message.length });
+    if (!drop) labelEntities.push({ type: "text_link", offset: newStart, length: shown.length, url: item.converted });
+    cursor = end;
   }
   message += text.slice(cursor);
 
@@ -80,6 +89,7 @@ export async function convertAffiliateText(text: string, settings: any, entities
   const overlapsSpan = (e: Entity) => spans.some((s) => e.offset < s.end && e.offset + e.length > s.start);
   const keptEntities = entities
     .filter((e) => !((e.type === "url" || e.type === "text_link") && overlapsSpan(e)))
+    .filter((e) => !(e.type === "text_link" && e.url && byUrl.has(e.url) && dropped(byUrl.get(e.url))))
     .map((entity) => {
       const start = position(entity.offset);
       const end = position(entity.offset + entity.length);

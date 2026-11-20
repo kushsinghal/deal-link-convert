@@ -182,7 +182,7 @@ export async function receiveConverter(request: Request, body: unknown) {
     const changed = result.items.some((i) => i.changed && !i.error);
     const own = result.items.some((i: any) => i.own);
     const direct = msg.chat.type !== "channel";
-    // Convert what can be converted; every other link and all normal text stay exactly as sent.
+    // Convert what can be converted and remove every other link; normal text stays exactly as sent.
     let reply: Record<string, unknown> | null = null;
     if (!result.items.length) reply = null;
     else if (changed || own) {
@@ -203,9 +203,9 @@ export async function receiveConverter(request: Request, body: unknown) {
     // The reply is already sent; saving the deal (slow product lookup) and logging must not delay it.
     lastBackground = (async () => {
       if (!result.items.length) return;
-      if (direct && changed && failed.length) await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: `${failed.length} link(s) could not be converted and were left as they are: ${[...new Set(failed.map((i) => i.error))].join("; ").slice(0, 3000)}` }).catch(() => {});
+      if (direct && changed && failed.length) await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: `${failed.length} link(s) could not be converted and were removed: ${[...new Set(failed.map((i) => i.error))].join("; ").slice(0, 3000)}` }).catch(() => {});
       await db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, store: i.store, original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted,
-        status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error || (!i.changed && !i.own ? "Not a convertible shop link; left as it is" : null), message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: new Date(repliedAt).toISOString(),
+        status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error || (!i.changed && !i.own ? "Not a convertible shop link; removed" : null), message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: new Date(repliedAt).toISOString(),
         convert_ms: repliedAt - receivedAt, total_ms: Math.max(0, repliedAt - messageAt) })));
       for (const i of result.items) await alertIfExtraPeKeyFailed(i.error);
       for (const item of result.items) {

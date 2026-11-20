@@ -110,7 +110,7 @@ describe("Telegram affiliate conversion", () => {
     expect(await (await receiveConverter(request, body)).json()).toEqual({ ok: true });
     expect(state.sends).toHaveLength(0);
   });
-  it("converts shop links only, including links typed without http, and leaves other links and text untouched", async () => {
+  it("converts shop links only, including links typed without http, and removes other links while text stays", async () => {
     mockProviders();
     const text = "Loot amzn.to/abc and news https://example.org/story ok";
     vi.stubGlobal("fetch", vi.fn(async (input: any) => {
@@ -120,7 +120,7 @@ describe("Telegram affiliate conversion", () => {
       return new Response("<html></html>");
     }));
     const result = await convertAffiliateText(text, { earnkaro_token: "configured", amazon_route: "earnkaro", affiliate_routes: { Other: "original" } }, [{ type: "url", offset: 5, length: 11 }, { type: "url", offset: 26, length: 25 }]);
-    expect(result.message).toBe("Loot @Amazon and news https://example.org/story ok");
+    expect(result.message).toBe("Loot @Amazon and news  ok");
     expect(result.entities).toEqual([{ type: "text_link", offset: 5, length: 7, url: "https://ekaro.in/mine" }]);
   });
   it("edits paired channel posts in place instead of reposting", async () => {
@@ -139,12 +139,12 @@ describe("Telegram affiliate conversion", () => {
     expect(result.message).toBe("Grab @Link now");
     expect(result.entities).toEqual([{ type: "text_link", offset: 5, length: 5, url: "https://ekaro.in/abc" }]);
   });
-  it("keeps a failed link as plain text without an earning label", async () => {
+  it("removes a failed link, and its line when it stood alone, without an earning label", async () => {
     mockProviders();
     const url = "https://www.flipkart.com/item/p/itm123";
-    const result = await convertAffiliateText(`Deal ${url}`, { sankmo_token: "", earnkaro_token: "" });
+    const result = await convertAffiliateText(`Deal\n${url}\nEnd`, { sankmo_token: "", earnkaro_token: "" });
     expect(result.items[0]?.error).toBeTruthy();
-    expect(result.message).toBe(`Deal ${url}`);
+    expect(result.message).toBe("Deal\nEnd");
     expect(result.entities).toEqual([]);
   });
 });
