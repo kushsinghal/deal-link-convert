@@ -242,7 +242,6 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
   }
   if (deal.split) await fillSplitInfo(deal);
   if (!deal.image && !deal.clean_url.includes("flipkart")) deal.image = await engine.fetchOgImage(deal.clean_url);
-  // Price-history observations are recorded only when an editor publishes the deal.
   deal.affiliate_url = await safeConvert(deal.clean_url, settings);
   deal.converted = deal.affiliate_url !== deal.clean_url;
   deal.featured = false;
@@ -318,7 +317,7 @@ export async function fetchSource(src: any, runId?: string | null) {
   for (const it of items) {
     try {
       const parsed: any = engine.parseItem(it.text, it.links, it.image, settings);
-      if (!parsed || !parsed.categories.length || /\b(out of stock|sold out|deal (has )?ended|offer (has )?ended|coupon has ended|expired)\b/i.test(it.text)) continue;
+      if (!parsed || !parsed.categories.length || /\b(out of stock|sold out|deal (has )?ended|offer (has )?ended|coupon has ended|expired)\b/i.test(`${it.title || ""}\n${it.text}`)) continue;
       parsed.ext_id = it.ext_id;
       parsed.posted_at = it.posted_at;
       parsed.source_post_url = it.post_url;

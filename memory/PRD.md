@@ -80,3 +80,11 @@
 - Added user's 4 sources to preview DB. nitter RSS + @wealthydimes OK; @hotdealsbywd and @tapworthy have Telegram web preview disabled by owner (clear error message added).
 - Testing agent iteration_2: 22/22 backend, frontend 100%.
 - Amazon application still needs: live public domain (not preview URL), real published reviewed deals, own Associates tag for Amazon links (ExtraPe Amazon needs approval), 3 qualifying sales in 180 days.
+
+## 2026-11-20 (fork 2, part 2) — Deal fetching
+- Root cause of "no deals": no scheduler ran + imports were private drafts.
+- Added `.emergent/crons.yml` (every 15 min) -> POST /api/public/cron/tick (Bearer WEBHOOK_CRON_SECRET in backend/.env, 202 immediate ack). Render keeps using CRON_SECRET + /cron/fetch.
+- New setting `auto_publish` (default ON, Rules tab switch). Manual deals remain drafts. Unpublish via "Save as draft".
+- Auto-published deals record price_history; out-of-stock/expired/ended posts skipped.
+- Added user's ~40 sources. Broken: @hotdealsbywd, @tapworthy (preview disabled), desidime.com website x2 (HTTP 403).
+- Age limit kept at 24h (user choice). Tests: vitest 56/56; testing agent iteration_3/4 pass.

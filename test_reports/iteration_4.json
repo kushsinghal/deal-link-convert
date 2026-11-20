@@ -1,0 +1,39 @@
+{
+  "summary": "Retested the fixes from iteration 3. All of them pass. New pytest file: 5/5 passed. Regression file test_deal_fetching_autopublish.py: 5/5 passed (the slow 60s tick test was deselected, and cron tick was covered in the new file instead). (1) Price history: 43 of 43 published, priced deals with a product_key have a price_history row, so 0 are missing and none are duplicated. GET /price-history/{id} returns 'Seen in deal channels' points. The home card's price-history dialog shows data and the chart lines draw. (2) Unpublishing with publish:false and a 4-character title returns 200 and sets the deal to draft, and it is removed from public /deals. Publishing with a short title is still rejected with 400. (3) Ingest skip: I served a TEST RSS fixture from /app/public with 6 items posted 3h ago, so no Telegram post was triggered. I added it as a source and fetched it: fetched=6, new_deals=1. The 5 items saying 'OUT OF STOCK', 'Sold Out', 'coupon has ended', 'expired' and 'deal has ended' were skipped. The control item was auto-published. The fixture source, deal, seen keys and XML were deleted, and there are 40 sources again. (4) Admin copy: rule-interval-info reads 'Every 15 minutes (automatic schedule)...' and the interval select is gone. The Max posts help says 'Between 1 and 200 Telegram posts per scan' with no mention of drafts. The Sources subtitle is updated, fetch-all-button reads 'Fetch now' and shows the toast 'Fetch started. New deals will appear shortly.', and each row shows 'N deals imported'. No stale 'Import drafts', 'drafts imported' or 'stay private' copy remains. The Deals tab description is updated. (5) Regression: the home page shows 118 cards on desktop and mobile with 0px horizontal overflow. Cron tick returns 401 without auth and 202 with the secret. rule-auto-publish-switch toggled off, persisted through a reload, and was restored to ON; the API confirms auto_publish=true. The 'Loading offers...' hang happened again, once in 3 mobile loads. This time the Vite dev modules (@tanstack/start-client-core/*.js) got HTTP 429 from the preview edge, so the client entry import failed. It only happens on the dev server or preview, but the home page still has no SSR or retry fallback.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/public/deals/{id}/review", "issue": "If publish:false is sent without a title or editorial_note, saveReview sets title='' and editorial_note=''. The data is wiped; this was verified, the title became ''. The current UI always sends a title, but the API should keep fields that are missing from the request ($set only the fields provided)."},
+      {"endpoint": "data", "issue": "The deal published before the fix, eced3529... 'The Kalyan Jewellers gold deal is now OUT OF STOCK ...', is still public. The new skip filter only affects new ingests. Consider unpublishing it, or a one-time cleanup. This is the user's data, so it was not changed."},
+      {"endpoint": "fetchSource skip regex", "issue": "The skip check only tests it.text and not it.title. Website and RSS items whose title says 'Sold out' but whose body does not are still ingested."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Home deals grid", "issue": "Intermittent (1 in 3 rapid loads): the preview edge returns 429 or 503 for Vite dev modules, so hydration fails and 'Loading offers...' stays forever. This is limited to dev/preview, but there is no SSR or retry fallback.", "selector": "[data-testid='deals-loading']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin Deals", "issues": ["A published deal 'Swiggy Instamart loot' links to a Swiggy CDN asset URL (instamart-media-assets.swiggy.com/.../dash-front-assets/js/) instead of a product page. The link filter in parseItem did not catch it in this case."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter4_pricehistory_skip_unpublish.py", "/app/backend/tests/test_deal_fetching_autopublish.py", "/app/test_reports/pytest/iteration_4.xml"],
+  "action_items": [
+    "In saveReview, $set title and editorial_note only when they are provided, so an unpublish does not wipe them.",
+    "Optional: apply the out-of-stock/expired skip regex to it.title as well, and unpublish the existing 'OUT OF STOCK' Kalyan deal.",
+    "Optional: remove the stale comment at core.server.ts:245 ('Price-history observations are recorded only when an editor publishes').",
+    "Optional: add SSR or a retry for the home deals list. The stuck loading only happens when the dev server hits 429/503."
+  ],
+  "critical_code_review_comments": [
+    "core.server.ts is 894 lines, over the 700-line threshold.",
+    "The comment at core.server.ts:245 contradicts the new price_history insert at line 261.",
+    "RulesTab still sends check_interval_seconds (300) to the API even though the UI no longer shows it. This is harmless but dead state."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter4_pricehistory_skip_unpublish.py"],
+  "success_rate": {"backend": "100% (10/10 across both files)", "frontend": "95% (intermittent dev-edge 429 hydration failure)"},
+  "test_credentials": "/app/memory/test_credentials.md: /admin password preview123",
+  "seed_data_creation": "None kept. A temporary TEST RSS source, its 1 deal, its seen keys, /app/public/TEST_feed_*.xml and 1 manual TEST deal were all deleted. auto_publish was restored to true.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The ingest skip filter can be tested safely by writing an RSS file into /app/public (served at BASE_URL/<file>) and adding it as an rss source. Use pubDate about 3h ago so it is older than telegram_max_age_minutes (60) and auto_post (ON) does not post to real channels. Clean up the source, deals, and seen keys (prefix '<source_id>:'). Mongo DB is dealloot_preview. Deal 002a19bc-215a-4e16-b440-0eb490975ba1 has price history data."
+}
