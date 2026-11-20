@@ -3,6 +3,7 @@ services:
   - type: web
     name: dealloot
     runtime: node
+    region: singapore
     plan: free
     buildCommand: yarn install --frozen-lockfile --production=false && node scripts/build-production.mjs
     startCommand: node scripts/start-production.mjs
