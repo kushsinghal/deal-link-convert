@@ -73,9 +73,17 @@ export async function notifyOwner(text: string, alertKey?: string) {
   return sent;
 }
 
-export async function alertIfExtraPeKeyFailed(error: string | null | undefined) {
-  if (!error || !EXTRAPE_KEY_ERROR.test(error)) return;
-  await notifyOwner("⚠️ ExtraPe key problem: your links are NOT being converted to your ExtraPe links.\n\nExtraPe says your access token is expired or invalid. Log in to extrape.com, copy the new token and update it in Control Room → Affiliate Setup.\n\nDetail: " + error.slice(0, 300), "extrape-key");
+const KEY_ALERTS: [string, RegExp, string][] = [
+  ["extrape-key", EXTRAPE_KEY_ERROR, "⚠️ ExtraPe key problem: your links are NOT being converted to your ExtraPe links.\n\nExtraPe says your access token is expired or invalid. Log in to extrape.com, copy the new token and update it in Control Room → Affiliate Setup."],
+  ["earnkaro-key", /EarnKaro[^;]*(?:\b401\b|\b403\b|unauthori[sz]ed|invalid[^;]*token|token[^;]*(?:expired|invalid)|jwt|log ?in)/i, "⚠️ EarnKaro key problem: EarnKaro rejected your API token, so it can't convert links.\n\nOpen EarnKaro, copy a fresh API token and update it in Control Room → Affiliate Setup."],
+  ["sankmo-key", /Sankmo[^;]*(?:Invalid Token|log in with your Telegram|AUTH_KEY|SESSION_REVOKED|USER_DEACTIVATED|\b401\b|\b403\b)/i, "⚠️ Sankmo problem: Sankmo links are not converting.\n\nYour Sankmo token was rejected or the @sankmo_bot Telegram login has ended. Log in again in Control Room → Affiliate Setup → Sankmo via Telegram."],
+  ["x-cookie", /X cookie login rejected|X: add the spare account/i, "⚠️ X backup problem: the spare X account's cookies stopped working, so X posts can't be read as a backup.\n\nLog in to the spare X account in your browser, copy the new auth_token and ct0 cookies and update X_AUTH_TOKEN and X_CT0."],
+];
+
+/** Sends a Telegram alert (max once per 6 hours per service) when a converter key or the X cookies stop working. */
+export async function alertIfKeyFailed(error: string | null | undefined) {
+  if (!error) return;
+  for (const [key, re, text] of KEY_ALERTS) if (re.test(error)) await notifyOwner(`${text}\n\nDetail: ${error.slice(0, 300)}`, key);
 }
 
 /** Run by the scheduler: re-registers the webhook if Telegram lost it and tells the owner. */
@@ -87,6 +95,8 @@ export async function checkConverterHealth() {
   let info: any;
   try { info = await telegramCall(token, "getWebhookInfo", {}); } catch (e) { return { checked: true, error: (e as Error).message }; }
   if (info.url === expected) return { checked: true, ok: true };
+  // Another copy of the site (preview or live) took over the bot; don't fight it.
+  if (info.url) return { checked: true, ok: true, other_url: info.url };
   try {
     await telegramCall(token, "setWebhook", { url: expected, secret_token: webhookSecret(token), allowed_updates: ["message", "channel_post"], drop_pending_updates: false });
     await notifyOwner("🔄 The converter bot connection was lost and has been restored automatically. You can keep sending links.", "converter-restored");
@@ -207,7 +217,7 @@ export async function receiveConverter(request: Request, body: unknown) {
       await db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, store: i.store, original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted,
         status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error || (!i.changed && !i.own ? "Not a convertible shop link; removed" : null), message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: new Date(repliedAt).toISOString(),
         convert_ms: repliedAt - receivedAt, total_ms: Math.max(0, repliedAt - messageAt) })));
-      for (const i of result.items) await alertIfExtraPeKeyFailed(i.error);
+      for (const i of result.items) await alertIfKeyFailed(i.error);
       for (const item of result.items) {
         if (item.error || !item.changed) continue;
         await publishConversion({ original: item.original, cleaned: item.cleaned, converted: item.converted, error: null, text, settings, source: "Telegram converter" });

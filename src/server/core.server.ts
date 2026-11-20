@@ -60,7 +60,7 @@ async function safeConvert(url: string, settings: any) {
     return await engine.convertLink(url, settings);
   } catch (e) {
     console.warn("Link conversion failed", e?.message);
-    void import("./telegram-converter.server").then((t) => t.alertIfExtraPeKeyFailed(String(e?.message || ""))).catch(() => {});
+    void import("./telegram-converter.server").then((t) => t.alertIfKeyFailed(String(e?.message || ""))).catch(() => {});
     return url;
   }
 }
@@ -302,9 +302,10 @@ export async function fetchSource(src: any, runId?: string | null) {
   try {
     ({ items, via } = await (await import("./x-feed.server")).fetchSourceItems(src));
   } catch (e) {
-    const err = String(e?.message || e).slice(0, 300);
-    await db.from("sources").update({ last_error: err, last_fetched_at: now() }).eq("id", src.id);
-    return { fetched: 0, new_deals: 0, error: err };
+    const err = String(e?.message || e).slice(0, 600);
+    void import("./telegram-converter.server").then((t) => t.alertIfKeyFailed(err)).catch(() => {});
+    await db.from("sources").update({ last_error: err.slice(0, 300), last_fetched_at: now() }).eq("id", src.id);
+    return { fetched: 0, new_deals: 0, error: err.slice(0, 300) };
   }
   if (!Array.isArray(items)) {
     const err = "Source returned an invalid response";
