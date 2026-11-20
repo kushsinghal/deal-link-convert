@@ -32,7 +32,7 @@ describe("Telegram affiliate conversion", () => {
     mockProviders();
     const url = "https://www.flipkart.com/item/p/itm123?affid=someone";
     const text = `  🎁 Deal ₹399!\n${url},\nAgain ${url}.  `;
-    const result = await convertAffiliateText(text, { sankmo_token: "configured", earnkaro_token: "configured" });
+    const result = await convertAffiliateText(text, { sankmo_token: "configured", earnkaro_token: "configured", affiliate_routes: { Flipkart: "sankmo" } });
     expect(result.message).toBe("  🎁 Deal ₹399!\n@Flipkart,\nAgain @Flipkart.  ");
     expect(result.entities).toEqual([
       { type: "text_link", offset: 16, length: 9, url: "https://ekaro.in/mine" },

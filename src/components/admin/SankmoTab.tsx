@@ -46,24 +46,35 @@ const TelegramConnect = () => (
 const ALL_STORES = ["Flipkart", "Myntra", "Ajio", "Shopsy", "Meesho", "Croma", "Tata CLiQ", "JioMart", "Nykaa", "Xiaomi", "Snapdeal",
   "Reliance Digital", "Paytm", "Swiggy", "Zomato", "Woohoo", "Gyftr"];
 
+const ROUTE_NAMES = { extrape: "ExtraPe", earnkaro: "EarnKaro", sankmo: "Sankmo" };
+
 const StoresPanel = ({ s, setS }) => {
   const routes = s.affiliate_routes || {};
-  const routeFor = (name) => routes[name] || ((s.sankmo_stores || []).includes(name) ? "sankmo" : "earnkaro");
-  const change = async (name, route) => {
-    const next = { ...routes, [name]: route };
-    try { const { data } = await api.put("/settings", { affiliate_routes: next }); setS(data); toast.success(`${name} now uses ${route === "original" ? "clean link" : route}`); }
+  const routeFor = (name) => (name === "Amazon" ? (s.amazon_route === "earnkaro" ? "earnkaro" : "extrape") : ({ amazon: "earnkaro" }[routes[name]] || routes[name] || "extrape"));
+  const put = async (body, msg) => {
+    try { const { data } = await api.put("/settings", body); setS(data); toast.success(msg); }
     catch (e) { toast.error(errMsg(e)); }
   };
+  const change = (name, route) => put(name === "Amazon" ? { amazon_route: route } : { affiliate_routes: { ...routes, [name]: route } },
+    `${name} now uses ${route === "original" ? "clean link" : ROUTE_NAMES[route]}`);
+  const allExtraPe = () => put({ amazon_route: "extrape", affiliate_routes: Object.fromEntries([...ALL_STORES, "Other"].map((n) => [n, "extrape"])) }, "Every store now uses ExtraPe");
   return (
-    <Panel testid="sankmo-stores-panel" title="Affiliate route by store" desc="Choose one service per store. Amazon is routed through EarnKaro.">
+    <Panel testid="sankmo-stores-panel" title="Affiliate route by store" desc="Choose one service per store. ExtraPe is the default; EarnKaro is used as a backup if ExtraPe fails.">
+      <Button data-testid="affiliate-all-extrape-button" className={`${ghostBtn} mb-3`} onClick={allExtraPe}>Use ExtraPe for every store</Button>
       <div className="space-y-2">
         {["Amazon", ...ALL_STORES, "Other"].map((n) => (
           <div key={n} className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 py-2">
             <span className="text-sm font-semibold">{n}</span>
-            {n === "Amazon" ? <span data-testid="affiliate-route-amazon" className="text-xs font-semibold">EarnKaro</span> :
+            {n === "Amazon" ?
+              <select aria-label="Amazon affiliate service" data-testid="affiliate-route-amazon" value={routeFor(n)} onChange={(e) => change(n, e.target.value)}
+                className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold">
+                <option value="extrape">ExtraPe</option>
+                <option value="earnkaro">EarnKaro</option>
+              </select> :
               <select aria-label={`${n} affiliate service`} data-testid={`affiliate-route-${n.toLowerCase().replace(/\s+/g, "-")}`} value={routeFor(n)}
                 onChange={(e) => change(n, e.target.value)} className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold">
-                <option value="sankmo">Sankmo → EarnKaro fallback</option>
+                <option value="extrape">ExtraPe</option>
+                <option value="sankmo">Sankmo → ExtraPe fallback</option>
                 <option value="earnkaro">EarnKaro</option>
                 <option value="original">Keep clean link</option>
               </select>}
@@ -78,14 +89,15 @@ export const SankmoTab = () => {
   const [s, setS] = useState(null);
   const [token, setToken] = useState("");
   const [earnkaroToken, setEarnkaroToken] = useState("");
+  const [extrapeToken, setExtrapeToken] = useState("");
   const load = () => api.get("/settings").then((r) => setS(r.data));
   useEffect(() => { load(); }, []);
   if (!s) return null;
   const save = async (extra = {}) => {
     try {
       const { data } = await api.put("/settings", { sankmo_api_url: s.sankmo_api_url,
-        convert_enabled: s.convert_enabled, sankmo_bot: s.sankmo_bot, convert_mode: s.convert_mode, sankmo_token: token, earnkaro_token: earnkaroToken, ...extra });
-      setS(data); setToken(""); setEarnkaroToken("");
+        convert_enabled: s.convert_enabled, sankmo_bot: s.sankmo_bot, convert_mode: s.convert_mode, sankmo_token: token, earnkaro_token: earnkaroToken, extrape_token: extrapeToken, ...extra });
+      setS(data); setToken(""); setEarnkaroToken(""); setExtrapeToken("");
       toast.success("Affiliate settings saved");
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -95,8 +107,19 @@ export const SankmoTab = () => {
   );
   return (
     <div className="grid gap-6 lg:grid-cols-2">
-    <Panel testid="sankmo-panel" title="Affiliate links" desc="Choose a service for each store. Amazon always uses EarnKaro.">
+    <Panel testid="sankmo-panel" title="Affiliate links" desc="ExtraPe converts links by default. EarnKaro stays as a backup.">
         <div className="space-y-5">
+          <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
+            <Label className="text-xs text-slate-700">ExtraPe access token {s.extrape_token_masked && <span data-testid="extrape-token-saved" className="font-mono text-emerald-700">· saved {s.extrape_token_masked}</span>}</Label>
+            <Input data-testid="extrape-token-input" type="password" value={extrapeToken} onChange={(e) => setExtrapeToken(e.target.value)}
+              placeholder={s.extrape_token_masked ? "Leave empty to keep current token" : "Paste your ExtraPe access token"} className={fieldCls} />
+            <ol data-testid="extrape-token-help" className="list-decimal space-y-1 pl-4 text-xs text-slate-600">
+              <li>On a computer, sign in at extrape.com with your ExtraPe account.</li>
+              <li>Press F12 → Application (Storage in Firefox) → Cookies → https://www.extrape.com.</li>
+              <li>Copy the value of the cookie named <span className="font-mono">accessToken</span> and paste it here, then Save.</li>
+            </ol>
+            <p className="text-xs text-slate-500">ExtraPe has no public API page; this uses the same converter as its website. If ExtraPe signs you out, copy a fresh token.</p>
+          </div>
           <div className="flex items-center gap-3">
             <Switch data-testid="sankmo-enabled-switch" checked={s.convert_enabled} onCheckedChange={(v) => save({ convert_enabled: v })} />
             <span className="text-sm">Convert links automatically</span>
@@ -118,7 +141,7 @@ export const SankmoTab = () => {
             <Label className="text-xs text-slate-600">EarnKaro API token {s.earnkaro_token_masked && <span className="font-mono text-emerald-700">· saved {s.earnkaro_token_masked}</span>}</Label>
             <Input data-testid="earnkaro-token-input" type="password" value={earnkaroToken} onChange={(e) => setEarnkaroToken(e.target.value)}
               placeholder={s.earnkaro_token_masked ? "Leave empty to keep current token" : "Paste your EarnKaro token"} className={fieldCls} />
-            <p className="text-xs text-slate-500">No Telegram bot setup is needed for this app. The separate EarnKaro converter bots are for converting inside Telegram; this app uses the API details you shared for pasted links and new deals.</p>
+            <p className="text-xs text-slate-500">Optional backup: used when ExtraPe has no token or fails, and for any store set to EarnKaro.</p>
           </div>
           <Button data-testid="sankmo-save-button" className={primaryBtn} onClick={() => save()}>Save</Button>
         </div>

@@ -32,7 +32,7 @@ const DEFAULT_SETTINGS = {
   auto_post: true, supercoin_enabled: true, gold_enabled: true, giftcard_enabled: true, giftcard_min: 5,
   product_enabled: true, product_min: 70, loot_enabled: true, keywords: [],
   convert_enabled: true, sankmo_api_url: "", sankmo_token: "", convert_mode: "sankmo_api",
-  earnkaro_token: "", affiliate_routes: {}, telegram_converter_token: "", telegram_converter_username: "", telegram_converter_url: "", telegram_converter_connected: false,
+  earnkaro_token: "", extrape_token: "", amazon_route: "extrape", affiliate_routes: {}, telegram_converter_token: "", telegram_converter_username: "", telegram_converter_url: "", telegram_converter_connected: false,
   check_interval_minutes: 5, check_interval_seconds: 300, post_style: "simple", max_posts_per_update: 20,
   website_max_age_hours: 24, telegram_max_age_minutes: 60, last_run_at: null,
   copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
@@ -696,8 +696,8 @@ export async function sendRecent(id: string) {
 }
 
 export function adminSettingsView(s: any) {
-  const { sankmo_token, earnkaro_token, telegram_converter_token, amazon_tag, tg_session, tg_api_hash, ...rest } = s;
-  return { ...rest, sankmo_token_masked: mask(sankmo_token || ""), earnkaro_token_masked: mask(earnkaro_token || ""), telegram_converter_token_masked: mask(telegram_converter_token || ""), tg_connected: false, tg_api_hash_masked: "" };
+  const { sankmo_token, earnkaro_token, extrape_token, telegram_converter_token, amazon_tag, tg_session, tg_api_hash, ...rest } = s;
+  return { ...rest, sankmo_token_masked: mask(sankmo_token || ""), earnkaro_token_masked: mask(earnkaro_token || ""), extrape_token_masked: mask(extrape_token || ""), telegram_converter_token_masked: mask(telegram_converter_token || ""), tg_connected: false, tg_api_hash_masked: "" };
 }
 
 export async function readSettings() {
@@ -708,6 +708,9 @@ export async function writeSettings(body: any) {
   const upd: any = Object.fromEntries(Object.entries(body || {}).filter(([k, v]) => v !== null && v !== undefined && k in DEFAULT_SETTINGS));
   if (upd.sankmo_token === "") delete upd.sankmo_token;
   if (upd.earnkaro_token === "") delete upd.earnkaro_token;
+  if (upd.extrape_token === "") delete upd.extrape_token;
+  if ("extrape_token" in upd) upd.extrape_token = String(upd.extrape_token).trim();
+  if ("amazon_route" in upd && !["extrape", "earnkaro"].includes(upd.amazon_route)) throw new HttpError(400, "Amazon must use ExtraPe or EarnKaro");
   for (const k of ["telegram_converter_username", "telegram_converter_url", "telegram_converter_connected"]) delete upd[k];
   if (upd.telegram_converter_token === "") delete upd.telegram_converter_token;
   if ("converter_label_style" in upd && !(["store", "link"] as string[]).includes(upd.converter_label_style)) throw new HttpError(400, "Label style must be store or link");
@@ -803,14 +806,7 @@ export async function convertBulk(body: any) {
     }
     const store = engine.detectStore(clean);
     if (!err && out === clean) {
-      const selectedRoute = store === "Amazon"
-        ? "earnkaro"
-        : settings.affiliate_routes?.[store] || ((settings.sankmo_stores?.length ? settings.sankmo_stores : engine.SANKMO_DEFAULT).includes(store) ? "sankmo" : "earnkaro");
-      err = (selectedRoute === "earnkaro" || selectedRoute === "amazon") && !settings.earnkaro_token
-        ? "Add your EarnKaro API token in Affiliate links settings"
-        : selectedRoute === "sankmo" && !settings.sankmo_token
-            ? "Add your Sankmo token first"
-            : "The selected affiliate service returned no earning link";
+      err = engine.missingTokenError(engine.affiliateRoute(store, settings), settings) || "The selected affiliate service returned no earning link";
     }
     swaps.push([orig, out]);
     const code = uuid().replace(/-/g, "").slice(0, 8);

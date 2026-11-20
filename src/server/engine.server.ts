@@ -559,22 +559,70 @@ export function amazonAffiliate(url: string, tag: string) {
   return rebuild(p, params);
 }
 
+export const AFFILIATE_SERVICES = ["extrape", "earnkaro", "sankmo", "original"];
+
+export function affiliateRoute(store: string, settings: any) {
+  if (store === "Amazon") return settings.amazon_route === "earnkaro" ? "earnkaro" : "extrape";
+  const route = settings.affiliate_routes?.[store];
+  return route === "amazon" ? "earnkaro" : AFFILIATE_SERVICES.includes(route) ? route : "extrape";
+}
+
+export function missingTokenError(route: string, settings: any) {
+  if (route === "extrape" && !settings.extrape_token && !settings.earnkaro_token) return "Add your ExtraPe access token in Affiliate links settings";
+  if (route === "earnkaro" && !settings.earnkaro_token) return "Add your EarnKaro API token in Affiliate links settings";
+  if (route === "sankmo" && !settings.sankmo_token) return "Add your Sankmo token first";
+  return null;
+}
+
+// ExtraPe first; EarnKaro is the backup when ExtraPe has no token or fails.
+async function convertWithDefault(url: string, settings: any) {
+  if (!(settings.extrape_token || "").trim()) {
+    if ((settings.earnkaro_token || "").trim()) return convertWithEarnKaro(url, settings);
+    throw new Error("Add your ExtraPe access token in Affiliate links settings");
+  }
+  try {
+    return await convertWithExtraPe(url, settings);
+  } catch (e) {
+    if (!(settings.earnkaro_token || "").trim()) throw e;
+    try {
+      return await convertWithEarnKaro(url, settings);
+    } catch (fallbackError) {
+      throw new Error(`${e?.message || "ExtraPe conversion failed"}; EarnKaro backup: ${fallbackError?.message || "conversion failed"}`);
+    }
+  }
+}
+
+async function convertWithExtraPe(url: string, settings: any) {
+  const token = (settings.extrape_token || "").trim();
+  const r = await fetch("https://www.extrape.com/handler/convertText", {
+    method: "POST",
+    body: JSON.stringify({ inputText: url, bitlyConvert: false, advanceMode: false }),
+    headers: { "Content-Type": "application/json", accesstoken: token, Cookie: `accessToken=${token}` },
+    signal: AbortSignal.timeout(20000),
+  });
+  const raw = await r.text();
+  let data: any;
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = { data: raw }; }
+  if (!r.ok || data?.success === false) {
+    throw new Error(`ExtraPe: ${data?.errorCode || data?.errorMessage || data?.message || `converter failed (${r.status})`} (check the link, or save a fresh ExtraPe access token)`);
+  }
+  const payload = data?.convertedText ?? data?.outputText ?? data?.data ?? data;
+  const candidate = findUrls(typeof payload === "string" ? payload : JSON.stringify(payload)).find((link) => link !== url);
+  if (!candidate) throw new Error("ExtraPe returned no converted link (check your access token)");
+  return candidate;
+}
+
 export async function convertLink(url: string, settings: any) {
   if (settings.convert_enabled === false || isDealSite(url)) return url;
-  const store = detectStore(url);
-  const route = store === "Amazon"
-    ? "earnkaro"
-    : settings.affiliate_routes?.[store] || ((settings.sankmo_stores?.length ? settings.sankmo_stores : SANKMO_DEFAULT).includes(store) ? "sankmo" : "earnkaro");
+  const route = affiliateRoute(detectStore(url), settings);
   if (route === "original") return url;
-  // Older settings may still say "amazon"; Amazon links now always use EarnKaro.
-  if (route === "earnkaro" || route === "amazon") return convertWithEarnKaro(url, settings);
-  const allowed = settings.sankmo_stores?.length ? settings.sankmo_stores : SANKMO_DEFAULT;
-  if (!allowed.includes(store)) return convertWithEarnKaro(url, settings);
+  if (route === "extrape") return convertWithDefault(url, settings);
+  if (route === "earnkaro") return convertWithEarnKaro(url, settings);
   const mode = settings.convert_mode || "sankmo_api";
-  if (mode === "telegram") return convertWithEarnKaro(url, settings); // personal-account conversion was explicitly removed
+  if (mode === "telegram") return convertWithDefault(url, settings);
   const token = (settings.sankmo_token || "").trim();
   if (mode === "sankmo_api") {
-    if (!token) return convertWithEarnKaro(url, settings);
+    if (!token) return convertWithDefault(url, settings);
     try {
       const r = await fetch("https://sankmo.in/api/convertMunafaLinks", {
         method: "POST", body: new URLSearchParams({ text: url }), headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000),
@@ -585,14 +633,14 @@ export async function convertLink(url: string, settings: any) {
       throw new Error(`Sankmo: ${data?.msg || "no converted link returned"}`);
     } catch (e) {
       try {
-        return await convertWithEarnKaro(url, settings);
+        return await convertWithDefault(url, settings);
       } catch (fallbackError) {
-        throw new Error(`${e?.message || "Sankmo conversion failed"}; EarnKaro fallback: ${fallbackError?.message || "conversion failed"}`);
+        throw new Error(`${e?.message || "Sankmo conversion failed"}; fallback: ${fallbackError?.message || "conversion failed"}`);
       }
     }
   }
   const api = (settings.sankmo_api_url || "").trim();
-  if (!api || !token) return convertWithEarnKaro(url, settings);
+  if (!api || !token) return convertWithDefault(url, settings);
   try {
     const r = api.includes("{url}")
       ? await fetch(api.replace("{url}", encodeURIComponent(url)).replace("{token}", token), { signal: AbortSignal.timeout(15000) })
@@ -617,9 +665,9 @@ export async function convertLink(url: string, settings: any) {
     throw new Error("Sankmo returned no earning link");
   } catch (e) {
     try {
-      return await convertWithEarnKaro(url, settings);
+      return await convertWithDefault(url, settings);
     } catch (fallbackError) {
-      throw new Error(`${e?.message || "Sankmo conversion failed"}; EarnKaro fallback: ${fallbackError?.message || "conversion failed"}`);
+      throw new Error(`${e?.message || "Sankmo conversion failed"}; fallback: ${fallbackError?.message || "conversion failed"}`);
     }
   }
 }

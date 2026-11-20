@@ -6,6 +6,33 @@ afterEach(() => {
 });
 
 describe("affiliate routing", () => {
+  it("converts Flipkart and Amazon through ExtraPe by default", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      expect(String(input)).toBe("https://www.extrape.com/handler/convertText");
+      expect(new Headers(init?.headers).get("accesstoken")).toBe("ep-token");
+      const { inputText } = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ success: true, convertedText: `Deal ${inputText.includes("amazon") ? "https://extp.in/amz1" : "https://extp.in/fk1"}` }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const settings = { extrape_token: "ep-token", earnkaro_token: "configured" };
+    await expect(engine.convertLink("https://www.flipkart.com/item/p/itm123", settings)).resolves.toBe("https://extp.in/fk1");
+    await expect(engine.convertLink("https://www.amazon.in/dp/B000000001", settings)).resolves.toBe("https://extp.in/amz1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("falls back to EarnKaro when ExtraPe fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("extrape.com")
+      ? new Response(JSON.stringify({ success: false, errorCode: "Invalid Url" }), { status: 200 })
+      : new Response(JSON.stringify({ success: 1, data: "https://ekaro.in/backup" }), { status: 200 })));
+    await expect(engine.convertLink("https://www.flipkart.com/item/p/itm123", { extrape_token: "ep", earnkaro_token: "configured" })).resolves.toBe("https://ekaro.in/backup");
+  });
+
+  it("reports ExtraPe errors when no EarnKaro backup exists", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ success: false, errorCode: "Invalid Url" }), { status: 200 })));
+    await expect(engine.convertLink("https://www.flipkart.com/item/p/itm123", { extrape_token: "ep" })).rejects.toThrow("ExtraPe: Invalid Url");
+    await expect(engine.convertLink("https://www.flipkart.com/item/p/itm123", {})).rejects.toThrow("Add your ExtraPe access token");
+  });
+
   it("falls back from an unconverted Sankmo result to the configured EarnKaro route", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -20,7 +47,7 @@ describe("affiliate routing", () => {
 
     const link = await engine.convertLink("https://www.flipkart.com/item/p/itm123", {
       sankmo_token: "configured",
-      sankmo_stores: ["Flipkart"],
+      affiliate_routes: { Flipkart: "sankmo" },
       earnkaro_token: "configured",
     });
 
@@ -49,7 +76,7 @@ describe("affiliate routing", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("always routes Amazon through EarnKaro, even when legacy settings select another route", async () => {
+  it("routes Amazon through the EarnKaro backup when no ExtraPe token is saved, ignoring legacy routes", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: 1, data: "https://ekaro.in/amazon-link" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
 
