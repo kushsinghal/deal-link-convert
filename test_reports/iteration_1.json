@@ -1,0 +1,62 @@
+{
+  "summary": "Tested public preview at 1920x800 and 390x844, every guide/info page and invalid-route 404s, password-only admin, source CRUD/Test/Test-all, live ExtraPe, editorial visibility and UI publication/unpublication. Final pytest: 10/11 passed; Vitest: 56/56 passed after updating obsolete expectations and adding 13 policy/error regressions; TypeScript and production build passed. No deployment or Telegram sending performed.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/public/deals", "issue": "A missing product URL returns HTTP 500 with Cannot read properties of undefined (reading 'trim'), instead of a validation 400. Reproduced with {title: TEST_invalid_payload}; frontend.err.log confirms core.server.ts:563.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/public/sources/{id}/test", "issue": "Live DealsHeaven /feed returns remote HTTP 404; DesiDime homepage returns remote HTTP 403. Diagnostics expose these failures correctly; these are not successful readers in this environment."},
+      {"endpoint": "POST /api/public/convert", "issue": "Amazon is account/programme restricted, returning changed:false and the specific approval/tag error. Flipkart succeeds with a valid HTTPS fkrt.co link. Token replacement is NOT required."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "390px admin Deals review row", "issues": ["Four action buttons remain beside the flex-1 summary, shrinking it to roughly 80px. Timestamp labels/dates wrap into many lines and title/affiliate URL truncate almost entirely. Make the summary full-width on mobile and put actions on their own row. Review form itself is usable and no page horizontal overflow occurred."]},
+      {"screen": "Home metadata", "issues": ["index.tsx still describes live channel deals updated every few minutes, which conflicts with the reviewed-only website and empty configured sources."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_preview_workflows.py",
+    "/app/backend/tests/preview_fixture_tools.py",
+    "/app/test_reports/pytest/preview_workflows.xml",
+    "/app/src/test/editorial-policy.test.ts",
+    "/app/src/test/source-affiliate-regressions.test.ts",
+    "/app/test_reports/source-health-snapshots.json",
+    "/app/test_reports/source-health-test-all.json",
+    "/app/test_reports/affiliate-live-results.json"
+  ],
+  "action_items": [
+    "Validate manual deal payloads before reading body.url.trim(); retain the failing pytest regression and return actionable 400 errors.",
+    "Make mobile Deals row summary/timestamps full-width above action buttons.",
+    "Replace obsolete home SEO metadata with truthful reviewed-offer/buying-guide wording.",
+    "Untrack the legacy root .env before GitHub handoff; it contains obsolete VITE_SUPABASE_ANON_KEY and VITE_SUPABASE_URL. Current .gitignore does not remove an already tracked file. Actual backend/frontend .env files are ignored and not tracked.",
+    "Use a verified valid RSS endpoint or an authorized public Telegram alternative for inaccessible sites; do not describe DealsHeaven feed or DesiDime website reading as working.",
+    "Review publication filtering in sendRecent: it currently selects drafts and may count them as failed sends with Telegram error: undefined, even though postDeal correctly blocks actual sending. Static code-review finding, not live-send tested."
+  ],
+  "critical_code_review_comments": [
+    "Source HTTP URL checks block obvious private addresses but fetchText follows redirects without validating redirect targets or DNS resolutions. Consider server-side public-target validation on each hop; not probed against private infrastructure.",
+    "Price-history reads gate the requested deal by publication status, but shared price_history points are recorded before review and lack publication filtering. Private draft observations can potentially contribute to a published product's history; static review only.",
+    "SankmoTab initial settings load has no catch/error state and can remain blank on request failure; not fault-injected.",
+    "core.server.ts (884 lines) and engine.server.ts (832 lines) exceed the requested maintainability threshold; split by editorial/source/affiliate responsibility when practical.",
+    "Telegram converter baseline failures were caused by live EXTRAPE_SESSION_SECRET taking precedence over MOCKED EarnKaro fixtures, not editorial policy. Tests now explicitly isolate that env value, preserving all original Telegram assertions."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_preview_workflows.py",
+    "/app/backend/tests/preview_fixture_tools.py",
+    "/app/src/test/affiliate-and-rss.test.ts",
+    "/app/src/test/converted-deals.test.ts",
+    "/app/src/test/telegram-converter.test.ts",
+    "/app/src/test/source-affiliate-regressions.test.ts",
+    "/app/src/test/editorial-policy.test.ts",
+    "/app/test_reports/iteration_1.json"
+  ],
+  "success_rate": {"backend": "90.9% (10/11 API regressions); 100% (56/56 Vitest)", "frontend": "100% tested core workflows after explicit response waits; mobile visual issue remains"},
+  "test_credentials": "Read /app/memory/test_credentials.md before auth. /admin requires password preview123 only; no login ID. Production must use a different private password.",
+  "seed_data_creation": "No seed/reset scripts. Created only tracked TEST_ sources and temporary editorial fixtures; removed by returned IDs/ObjectIDs. UI fixture also removed. Source checks verified unchanged deals/logs/seen counts. No original configured sources existed in this fork.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Node TanStack app behind FastAPI proxy, not template backend. Use frontend/.env URL and /api/public prefix. Source snapshots: @telegram 20 posts, BBC RSS 33, DealsMagnet 5-6 readable; DealsHeaven feed404 and DesiDime403. Empty/malformed/HTML RSS distinctions and private Telegram errors verified with MOCKED reader responses; HTML/nonpublic failures also verified live. EarnKaro fallback, imported/manual draft defaults, Telegram posting successes and conversion policy are MOCKED unit-tested only; no live backup token or Telegram send tested. Live ExtraPe and API review pipeline are real. No deploy performed; Node output/index.mjs and adapter build paths verified. Backend secrets loaded from env were absent from public build artifacts; actual secure ExtraPe value was never printed. Public settings and admin masked settings verified. Initial forced-click publication smoke did not update; a normal click with HTTP response wait and status polling passed, so no publication app bug established. Crawl service lacked credits, but public RSS readability was successfully tested through the real source API.",
+  "rca of the issue": "Manual add trusts raw JSON and calls body.url.trim() at core.server.ts:563 before validation; the router catches this TypeError as a generic 500. Mobile row uses min-w-0 flex-1 summary alongside four fixed-width buttons, leaving insufficient space for the timestamp grid. Root .env is already tracked, so new ignore patterns do not exclude it from commits."
+}

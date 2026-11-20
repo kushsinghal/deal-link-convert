@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Zap, LayoutDashboard, Flame } from "lucide-react";
+import { Zap, LayoutDashboard, Flame, BookOpen } from "lucide-react";
 
 const base = "flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition-colors duration-200";
 const active = "bg-slate-900 text-white";
@@ -20,7 +20,8 @@ export const Navbar = () => (
         <Link to="/" activeOptions={{ exact: true }} className={base} activeProps={{ className: active }} inactiveProps={{ className: idle }} data-testid="public-deals-nav-link">
           <Flame className="h-4 w-4" /> <span className="hidden sm:inline">Deals</span>
         </Link>
-        <Link to="/admin" className={base} activeProps={{ className: active }} inactiveProps={{ className: idle }} data-testid="admin-dashboard-nav-link">
+        <a href="/guides" data-testid="guides-nav-link" aria-label="Shopping guides" className={`${base} ${idle}`}><BookOpen className="h-4 w-4" /><span className="hidden sm:inline">Guides</span></a>
+        <Link to="/admin" aria-label="Control Room" className={base} activeProps={{ className: active }} inactiveProps={{ className: idle }} data-testid="admin-dashboard-nav-link">
           <LayoutDashboard className="h-4 w-4" /> <span className="hidden sm:inline">Control Room</span>
         </Link>
       </nav>

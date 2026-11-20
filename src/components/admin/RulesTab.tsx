@@ -34,7 +34,7 @@ export const RulesTab = () => {
     }); toast.success("Rules saved"); } catch (e) { toast.error(errMsg(e)); }
   };
   return (
-    <Panel testid="rules-panel" title="What counts as a deal" desc="Only posts that match at least one rule are saved and sent to your channels.">
+    <Panel testid="rules-panel" title="What counts as a deal" desc="Matching posts are saved as drafts. Review and publish them before sending to Telegram. Automatic imports require a hosting scheduler; saving a timing value alone does not create one.">
       <div className="space-y-3">
         <Row testid="rule-auto-post-switch" label="Auto-post to Telegram" desc="Send matching deals to your channels as soon as they're found" checked={s.auto_post} onToggle={set("auto_post")} />
         <Row testid="rule-split-multi-switch" label="Split posts with many links" desc="A post with several product links becomes one deal per product (up to 10), each with its own picture and your link" checked={s.split_multi !== false} onToggle={set("split_multi")} />
@@ -64,7 +64,7 @@ export const RulesTab = () => {
           </div>
           <div className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">
             <p className="font-semibold">Max deals posted per update</p>
-            <p className="mb-2 text-xs text-slate-500">Between 1 and 200. Extra deals still show on the website.</p>
+            <p className="mb-2 text-xs text-slate-500">Between 1 and 200. Unreviewed deals remain private drafts.</p>
             <Input data-testid="rule-max-posts-input" type="number" min={1} max={200} value={s.max_posts_per_update} onChange={set("max_posts_per_update")} className={fieldCls} />
           </div>
           <div className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">

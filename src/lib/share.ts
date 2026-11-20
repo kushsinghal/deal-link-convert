@@ -2,7 +2,7 @@
 import { toast } from "sonner";
 import { api, inr } from "@/lib/api";
 
-const API = `/api/public`;
+const API = `${process.env.REACT_APP_BACKEND_URL}/api/public`;
 
 export const prefs = { header: "🪙 100% SuperCoin Deals 🪙", style: "direct" };
 export const setPrefs = (s) => {
@@ -24,6 +24,7 @@ export const dealText = ({ title, price, mrp, discount, store, link, preview, of
   (offers || []).forEach((o) => lines.push(`${{ bank: "💳", coupon: "🎟️", supercoin: "🪙", cashback: "💰" }[o.kind] || "•"} ${o.label}`));
   if (store && store !== "Other") lines.push(`🛒 Store: ${store}`);
   lines.push("", `👉 Buy now: ${preview && prefs.style === "preview" ? preview : link}`);
+  lines.push("Affiliate link: we may earn a commission. Verify price and offer terms at checkout.");
   return lines.join("\n");
 };
 

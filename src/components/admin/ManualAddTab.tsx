@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Panel, fieldCls, primaryBtn, ghostBtn } from "./Panel";
 
-const EMPTY = { url: "", title: "", price: "", mrp: "", image: "", note: "", categories: [], post_now: true };
+const EMPTY = { url: "", title: "", price: "", mrp: "", image: "", note: "", categories: [], post_now: false };
 const NOTES = [
   ["supercoin", "100% SuperCoins back — completely FREE (pay with SuperCoins)"],
   ["bank", "Extra ₹___ off with ___ Credit Card"],
@@ -65,7 +65,7 @@ export const ManualAddTab = () => {
       });
       const ok = data.post_results.filter((r) => r.status === "success").length;
       const fail = data.post_results.length - ok;
-      toast.success(`Deal live on website${f.post_now ? ` · sent to ${ok} channel(s)` : ""}`);
+      toast.success("Draft saved. Review it in Deals before publishing.");
       if (fail) toast.error(`${fail} channel(s) failed — check Post Log`);
       setF(EMPTY);
       setLastLooked("");
@@ -74,7 +74,7 @@ export const ManualAddTab = () => {
   };
 
   return (
-    <Panel testid="manual-add-panel" title="Post a deal by hand" desc="Paste a product link — name, price, MRP and picture are filled in automatically. The link becomes your earning link.">
+    <Panel testid="manual-add-panel" title="Add a deal draft" desc="Check any fetched product details. Drafts are private until you add original advice and publish them from Deals.">
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2"><Label className="text-xs text-slate-600">Product link</Label>
           <div className="flex gap-2">
@@ -112,12 +112,9 @@ export const ManualAddTab = () => {
                 className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${f.categories.includes(k) ? c.cls : "border-slate-300 text-slate-600 hover:text-slate-950"}`}>{c.label}</button>
             ))}
           </div></div>
-        <div className="flex items-center gap-3 sm:col-span-2">
-          <Switch data-testid="manual-deal-post-now-switch" checked={f.post_now} onCheckedChange={set("post_now")} />
-          <span className="text-sm text-slate-700">Send to matching Telegram channels now</span>
-        </div>
+        <p data-testid="manual-review-notice" className="text-sm text-slate-600 sm:col-span-2">Not sent to Telegram until reviewed and published.</p>
         <Button data-testid="manual-deal-submit-button" disabled={busy} className={`${primaryBtn} sm:col-span-2`} onClick={submit}>
-          {busy ? "Posting…" : "Publish deal"}
+          {busy ? "Saving…" : "Save draft"}
         </Button>
       </div>
     </Panel>

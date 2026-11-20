@@ -1,8 +1,8 @@
 // @ts-nocheck — ported from the original app
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ExternalLink, Copy, Star, LineChart, TrendingDown, Link2, Share2 } from "lucide-react";
 import { toast } from "sonner";
-import { api, CATS, inr, timeAgo } from "@/lib/api";
+import { api, CATS, inr, timeAgo, getToken } from "@/lib/api";
 import { PriceHistoryDialog } from "@/components/PriceHistoryDialog";
 import { OriginalPostDialog } from "@/components/OriginalPostDialog";
 import { copyDeal, shareDeal, previewUrl } from "@/lib/share";
@@ -10,7 +10,7 @@ import { OffersBox } from "@/components/OffersBox";
 
 const Thumb = ({ deal }) =>
   deal.image ? (
-    <img src={deal.image} alt={deal.title} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" />
+    <img src={deal.image} alt={deal.title} className="h-full w-full object-contain p-3" loading="lazy" />
   ) : (
     <div className="grid h-full w-full place-items-center bg-gradient-to-br from-slate-100 to-slate-200">
       <span className="font-display text-5xl font-black text-slate-300">{deal.store?.[0] || "D"}</span>
@@ -22,6 +22,8 @@ const iconBtn = "grid shrink-0 place-items-center rounded-xl border border-slate
 export const DealCard = ({ deal, index = 0, onChange }) => {
   const [starred, setStarred] = useState(!!deal.featured);
   const [chart, setChart] = useState(false);
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => { setAdmin(!!getToken()); }, []);
   const link = deal.affiliate_url || deal.url;
   const visibleCategories = [...new Set((deal.categories || []).map((category) =>
     category === "loot" || category === "heavy_discount" ? "loot_price_drop" : category,
@@ -49,17 +51,17 @@ export const DealCard = ({ deal, index = 0, onChange }) => {
       <div className="relative aspect-[4/3] overflow-hidden">
         <Thumb deal={deal} />
         <span className="absolute left-3 top-3 rounded-md bg-white/90 px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-slate-800">{deal.store}</span>
-        <button onClick={toggleStar} data-testid={`star-deal-button-${deal.id}`} aria-label="Star deal"
+        {admin && <button onClick={toggleStar} data-testid={`star-deal-button-${deal.id}`} aria-label="Star deal"
           className="absolute bottom-3 right-3 grid h-9 w-9 place-items-center rounded-full bg-white/90 transition-transform hover:scale-110">
           <Star className={`h-4 w-4 ${starred ? "fill-[#FFC200] text-[#B7791F]" : "text-slate-700"}`} />
-        </button>
+        </button>}
         {deal.lowest_ever && (
           <span data-testid={`deal-lowest-${deal.id}`} className="absolute bottom-3 left-3 flex items-center gap-1 rounded-md bg-emerald-500 px-2 py-1 text-[11px] font-bold text-[#0A0E17]">
-            <TrendingDown className="h-3 w-3" /> Lowest ever
+            <TrendingDown className="h-3 w-3" /> Lowest observed
           </span>
         )}
         {deal.discount > 0 && (
-          <span data-testid="deal-discount" className="absolute right-3 top-3 rounded-md bg-[#FF5A1F] px-2.5 py-1 font-display text-xs font-extrabold text-white shadow-sm">
+          <span data-testid={`deal-discount-${deal.id}`} className="absolute right-3 top-3 rounded-md bg-[#FF5A1F] px-2.5 py-1 font-display text-xs font-extrabold text-white shadow-sm">
             {Math.round(deal.discount)}% OFF
           </span>
         )}
@@ -76,11 +78,13 @@ export const DealCard = ({ deal, index = 0, onChange }) => {
           {deal.mrp > deal.price && <span className="text-sm text-slate-500 line-through">{inr(deal.mrp)}</span>}
         </div>
         <OffersBox deal={deal} />
+        {deal.editorial_note && <p data-testid={`deal-editorial-${deal.id}`} className="whitespace-pre-line break-words text-sm leading-6 text-slate-700">{deal.editorial_note}</p>}
         <p data-testid={`deal-posted-${deal.id}`} className="font-mono text-[11px] text-slate-500">
           {deal.source} · posted {timeAgo(deal.posted_at || deal.created_at)}
         </p>
+        <p data-testid={`deal-disclosure-${deal.id}`} className="text-[11px] leading-5 text-slate-600">{deal.converted ? "Affiliate link · We may earn a commission." : "Retailer link · Not converted."} Price observed {timeAgo(deal.reviewed_at || deal.posted_at)}; check the retailer for today's price and conditions.</p>
         <div className="mt-auto flex gap-1.5 pt-1">
-          <a href={link} target="_blank" rel="noopener noreferrer" data-testid={`grab-deal-button-${deal.id}`}
+          <a href={link} target="_blank" rel="sponsored noopener noreferrer" data-testid={`grab-deal-button-${deal.id}`}
             className="flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-slate-900 py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#FF5A1F]">
             Grab <ExternalLink className="h-4 w-4" />
           </a>

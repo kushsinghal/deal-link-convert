@@ -90,9 +90,11 @@ export const SankmoTab = () => {
   const [token, setToken] = useState("");
   const [earnkaroToken, setEarnkaroToken] = useState("");
   const [extrapeToken, setExtrapeToken] = useState("");
-  const load = () => api.get("/settings").then((r) => setS(r.data));
+  const [loadError, setLoadError] = useState("");
+  const load = () => { setLoadError(""); return api.get("/settings").then((r) => setS(r.data)).catch(e => setLoadError(errMsg(e))); };
   useEffect(() => { load(); }, []);
-  if (!s) return null;
+  if (loadError) return <div data-testid="affiliate-settings-error" role="alert" className="space-y-3 text-sm text-rose-700"><p>{loadError}</p><Button data-testid="affiliate-settings-retry" onClick={load}>Retry settings</Button></div>;
+  if (!s) return <p data-testid="affiliate-settings-loading" className="text-sm text-slate-600">Loading affiliate settings…</p>;
   const save = async (extra = {}) => {
     try {
       const { data } = await api.put("/settings", { sankmo_api_url: s.sankmo_api_url,
@@ -111,14 +113,10 @@ export const SankmoTab = () => {
         <div className="space-y-5">
           <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
             <Label className="text-xs text-slate-700">ExtraPe access token {s.extrape_token_masked && <span data-testid="extrape-token-saved" className="font-mono text-emerald-700">· saved {s.extrape_token_masked}</span>}</Label>
-            <Input data-testid="extrape-token-input" type="password" value={extrapeToken} onChange={(e) => setExtrapeToken(e.target.value)}
+            <Input data-testid="extrape-token-input" type="password" disabled={s.extrape_managed} value={extrapeToken} onChange={(e) => setExtrapeToken(e.target.value)}
               placeholder={s.extrape_token_masked ? "Leave empty to keep current token" : "Paste your ExtraPe access token"} className={fieldCls} />
-            <ol data-testid="extrape-token-help" className="list-decimal space-y-1 pl-4 text-xs text-slate-600">
-              <li>On a computer, sign in at extrape.com with your ExtraPe account.</li>
-              <li>Press F12 → Application (Storage in Firefox) → Cookies → https://www.extrape.com.</li>
-              <li>Copy the value of the cookie named <span className="font-mono">accessToken</span> and paste it here, then Save.</li>
-            </ol>
-            <p className="text-xs text-slate-500">ExtraPe has no public API page; this uses the same converter as its website. If ExtraPe signs you out, copy a fresh token.</p>
+            <p data-testid="extrape-token-help" className="text-xs text-slate-600">{s.extrape_managed ? "Using the secure backend token. Its value is not sent to this browser." : "A backend EXTRAPE_SESSION_SECRET can supply this token securely."}</p>
+            <p data-testid="extrape-integration-notice" className="text-xs text-amber-800">Unofficial connection: ExtraPe's website endpoint can change. Amazon links require ExtraPe Amazon approval or your Amazon Associates tag configured inside ExtraPe. Link creation alone does not guarantee commission.</p>
           </div>
           <div className="flex items-center gap-3">
             <Switch data-testid="sankmo-enabled-switch" checked={s.convert_enabled} onCheckedChange={(v) => save({ convert_enabled: v })} />

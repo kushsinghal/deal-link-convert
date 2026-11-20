@@ -1,0 +1,18 @@
+[
+  {
+    "original": "https://www.flipkart.com/poco-c61-ethereal-blue-64-gb/p/itmd6f4d53827865",
+    "cleaned": "https://www.flipkart.com/poco-c61-ethereal-blue-64-gb/p/itmd6f4d53827865",
+    "converted": "https://fkrt.co/hCyHCP",
+    "changed": true,
+    "error": null,
+    "store": "Flipkart"
+  },
+  {
+    "original": "https://www.amazon.in/dp/B0BDHX8Z63",
+    "cleaned": "https://www.amazon.in/dp/B0BDHX8Z63",
+    "converted": "https://www.amazon.in/dp/B0BDHX8Z63",
+    "changed": false,
+    "error": "ExtraPe: Amazon conversion requires approval for ExtraPe's Amazon program or your own Amazon Associates tag in ExtraPe. No earning link was created.",
+    "store": "Amazon"
+  }
+]

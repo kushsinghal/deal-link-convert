@@ -1,13 +1,75 @@
-# DealLoot PRD
-Original request: check the product, fix issues, and switch the link converter from EarnKaro to ExtraPe (EarnKaro not paying on Flipkart/Amazon).
-User choices: ExtraPe; keep both with ExtraPe default; user has no ExtraPe token yet.
+# DealLoot — product requirements and handoff
 
-## Done (2026-06)
-- ExtraPe converter (POST https://www.extrape.com/handler/convertText, accesstoken header/cookie) in src/server/engine.server.ts
-- Default route for every store incl. Amazon = ExtraPe; EarnKaro auto backup when ExtraPe token missing/fails; Sankmo optional
-- Affiliate Setup UI: ExtraPe token field + how-to, Amazon ExtraPe/EarnKaro choice, "Use ExtraPe for every store" button
-- Fixed TS error in affiliate.server.ts; 43 unit tests pass; production build OK
+## User goals and approved choices
+- Original: inspect/fix affiliate deals product; replace EarnKaro default with ExtraPe because of Amazon/Flipkart profits. Keep EarnKaro as a backup.
+- Latest: open preview and supply login, securely use authorised ExtraPe token, test RSS/Telegram sources, prepare files for either Emergent or Render/GitHub, and make truthful improvements for an Amazon affiliate application.
+- User chose all configured source checks; default recommended imported-deal review gate. Not a registered business; approved contact `hari121vrind@gmail.com`. Use existing DealLoot name without corporate or Amazon-approval claims.
+- Language: English. No actual deployment requested/performed. Do not guarantee affiliate commissions or approval.
 
-## Backlog
-- P0 user: add ExtraPe accessToken and test a real Flipkart/Amazon link
-- P1 deploy on Render; verify Telegram delivery
+## Actual architecture (do NOT replace with template)
+- Root `/app`: TypeScript React 19 + TanStack Start, Vite 8, Nitro Node server, MongoDB.
+- `src/server/engine.server.ts`: scraping/parsing, affiliate adapters, Telegram posting. `core.server.ts`: app operations. `router.server.ts`: `/api/public/*` dispatcher. `db.server.ts`: Mongo query adapter (excludes `_id`).
+- Added `source-input.server.ts`, `source-health.server.ts`, `review.server.ts` for input validation, no-import diagnostics, editorial publication.
+- Frontend `src/routes`, `src/views`, `src/components/admin`; guides/info content in `src/lib/editorial.ts`.
+- Emergent preview: supervisor frontend `/app/frontend` invokes root Vite through `scripts/start-preview.mjs` on port 3000. `/app/backend/server.py` FastAPI adapter on port 8001 proxies `/api/*` to Node via `NODE_INTERNAL_URL`. Root application logic remains Node.
+- Render: one Node service via `render.yaml`, `scripts/build-production.mjs` and `scripts/start-production.mjs`; no separate Python service.
+- Environment: preserve `MONGO_URL`, `DB_NAME`, `REACT_APP_BACKEND_URL`; backend/.env restored old preview config unchanged, frontend/.env current public origin + preview forwarding hostname. Secure ExtraPe secret is injected by the platform; not a file value to print.
+- Password-only existing admin access. See `memory/test_credentials.md`. Production startup requires 16+ char private password and 32+ char signing secret; never deploy preview password.
+
+## Completed — 2026-11-20
+### Startup and conversion
+- Fixed fork startup mismatch without editing readonly supervisor configuration; preview web/API and password login working.
+- Secure `EXTRAPE_SESSION_SECRET` received via card. getSettings uses it ahead of legacy database token; full token is never returned to browser. Admin UI identifies backend-managed token.
+- ExtraPe HTTP-200 business errors were falsely considered successful because its error text contained the original URL plus a period. Fixed: errorCode/errorMessage handled before URL extraction; trailing punctuation and unchanged URLs rejected.
+- ExtraPe Flipkart convertedText is percent-encoded. Decode before extracting earning link. LIVE successful conversion to `https://fkrt.co/...` verified repeatedly.
+- LIVE Amazon result is an account eligibility block: ExtraPe requires Amazon programme approval or own Amazon Associates tag configured inside ExtraPe. Token replacement is NOT needed. No false success; error is actionable.
+- EarnKaro fallback remains implemented and MOCKED-tested, but no live EarnKaro token exists in this fork.
+
+### Source checks
+- New source records now get IDs/timestamps (old code omitted IDs, breaking actions). Legacy missing IDs repaired on source-list read; toggling no longer blanks a name.
+- Normalize Telegram @names, channel URLs and post URLs incl. /s/ and query strings; reject private invites/unknown source types and obvious unsafe syntax.
+- RSS detects HTML masquerading as feed, malformed XML, and non-feed XML; supports RSS/Atom/RDF. Public Telegram empty channel vs unavailable preview distinguished.
+- Sources UI Test/Test all persist status, post count, timestamp and error without importing or sending. Import drafts is separate. Error/retry/status controls and mobile wrapping improved.
+- IMPORTANT: original saved sources, deals and destinations were absent from this fork database. No original source list was invented. Live checks used clearly identified temporary test records, then removed them.
+- LIVE samples: Telegram @telegram readable (20); BBC RSS readable (~33); DealsMagnet readable (~5–6); DealsHeaven `/feed` HTTP404; DesiDime HTTP403. Blocked sources correctly show errors; not bypassed or claimed fixed.
+
+### Editorial / public website
+- Every imported/manual/converted deal starts as private draft. Reconversion resets review. Authenticated `/review-deals` lists drafts + published records.
+- Review form edits title/advice and requires >=80 chars original advice plus explicit rights/offer checklist before publishing. Unpublish supported. No invented firsthand product tests.
+- Public listings, counts, deal redirects, original-post and history entrypoints exclude drafts. Draft posts to Telegram rejected; sendRecent selects only published items.
+- Price observations recorded on publication; public shared history limited to published deal IDs. Legacy unlinked history points excluded, not deleted.
+- Added About, Contact, Editorial Standards, Affiliate Disclosure, Privacy, Terms, 3 original general shopping guides (illustrations are not product tests). Prominent nearby affiliate disclosures and sponsored links. Public page no longer calls admin-only scan or claims automatic live refresh.
+- Contact email approved by user. No Amazon Associate membership claim; after real enrolment operator must add Amazon-required exact statement and follow current programme rules.
+- Fixed manual missing/invalid URL payload 500 -> actionable400; validated basic manual numeric/text/category fields. Settings failure/retry now visible instead of blank. Improved mobile review summaries, long links and tab wrapping. SEO wording updated.
+
+### Hosting / source handoff
+- Node production build validated; Render blueprint uses Yarn lockfile, environment-supplied URL/port, database and private credentials. README documents both hosting layouts and required environment setup.
+- Browser API uses configured REACT_APP_BACKEND_URL; Render public origin maps from RENDER_EXTERNAL_URL when explicit origin is absent.
+- `scripts/export-source.py` creates `/public/downloads/dealloot-source.zip` (117 files) for a fresh GitHub repository. Real HTTP download/ZIP contents verified. Excludes secrets, .env files except template, tests, database, build output and Git history.
+- Root `.env` from original imported history remains tracked and contains obsolete **browser-public** Supabase config. Cannot be excluded retroactively by .gitignore. No new backend secrets are tracked. Clean archive avoids legacy configuration/history. README calls this out; no Git history rewritten or pushed.
+- No automatic scheduler configured. Existing authenticated cron route can be used; timing field alone doesn't schedule anything. If adding Emergent recurring imports later, load scheduled-recurring-tasks skill first.
+
+## Verification
+- Test report `/app/test_reports/iteration_1.json` read; confirmed functional/UI failures fixed.
+- Final: `yarn test` **56/56**, `yarn exec tsc --noEmit` pass; production Node build pass.
+- Final API pytest **11/11**: `/app/test_reports/pytest/final-preview-workflows.xml`.
+- Playwright public/home/login/pages/editorial flow and source controls on desktop1920x800 + mobile390x844. Final worst-case private review fixture: summary width290px; no horizontal overflow. Settings error injection + Retry recovery pass.
+- Real ExtraPe Flipkart and Amazon eligibility outcomes tested. Live sample source results stored `source-health-snapshots.json`, `source-health-test-all.json`.
+- Network responses in unit tests (including EarnKaro fallback and Telegram sending) are **MOCKED**. No real Telegram message sent; no deployment performed.
+- All temporary test records removed by tracked IDs. No fake offers remain publicly or privately after cleanup.
+
+## Priorities / next actions
+### P0 — user action / blocked external conditions
+- Re-add original source URLs or connect the correct original database; test those exact sources. This fork has none.
+- Amazon conversion needs ExtraPe Amazon eligibility or own Amazon Associates tag. Build honest original content and complete provider enrolment; no approval guarantee.
+### P1
+- Configure valid backup EarnKaro token if desired; verify real fallback and attribution/commission with provider.
+- User review guides/policies and publish genuine reviewed offers; use owned/authorised media and useful original comparisons before applying.
+- Choose host when ready; set production secrets/database and strong password. Use clean source ZIP for fresh Render/GitHub repository. Not deployed.
+- Live Telegram delivery requires configured authorised bot/destination and explicit send verification.
+### P2 / known limitations
+- Authenticated source fetchers currently follow redirects; harden DNS/public-target checks on every hop against SSRF if expanding administrative access. Static review observation, not exploitation tested.
+- Split remaining large engine/core modules; add richer regression coverage for sendRecent/public-only history changes.
+- Replace unavailable third-party feeds only with authorised, verified alternative source URLs; don't bypass anti-bot restrictions.
+- Optional scheduled draft import using host-supported scheduler; not an in-app interval loop.
+- Suggestion: add original comparison articles with own photos and transparent pros/cons to improve visitor trust and application substance.

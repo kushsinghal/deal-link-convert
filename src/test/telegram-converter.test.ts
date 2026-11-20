@@ -13,6 +13,8 @@ vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); state.paired = false; state.done = false; state.sends = []; });
 const token = "123456:" + "a".repeat(30);
 function mockProviders() {
+  // Isolate MOCKED backup tests from the live secure ExtraPe environment.
+  vi.stubEnv("EXTRAPE_SESSION_SECRET", "");
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes("sankmo.in")) return Response.json({ convertedText: "" });

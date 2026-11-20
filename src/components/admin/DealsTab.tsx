@@ -6,6 +6,7 @@ import { api, errMsg, inr, timeAgo, CATS } from "@/lib/api";
 import { formatKolkata } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Panel, ghostBtn } from "./Panel";
+import { ReviewEditor } from "./ReviewEditor";
 
 const DealRow = ({ d, reload }) => {
   const visibleCategories = [...new Set((d.categories || []).map((category) =>
@@ -28,9 +29,9 @@ const DealRow = ({ d, reload }) => {
   };
   return (
     <div data-testid={`admin-deal-row-${d.id}`} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-[#F5F2EA] p-3">
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-semibold">{d.title}</p>
-        <p className="truncate font-mono text-[11px] text-slate-500">
+      <div className="min-w-0 basis-full flex-1 sm:basis-0">
+        <p data-testid={`admin-deal-title-${d.id}`} className="break-words font-semibold">{d.title}</p>
+        <p className="break-words font-mono text-[11px] text-slate-500">
           {d.store} · {inr(d.price) || "–"} · {Math.round(d.discount || 0)}% · {visibleCategories.map((c) => c === "loot_price_drop" ? "Loot / Errors & Price Drop" : CATS[c]?.short).join(", ")} · from {d.source || "Unknown source"} · score {d.score} · posted {timeAgo(d.posted_at || d.created_at)}
         </p>
         <dl data-testid={`admin-deal-times-${d.id}`} className="mt-1 grid grid-cols-1 gap-x-4 gap-y-0.5 text-[11px] text-slate-600 sm:grid-cols-2">
@@ -40,7 +41,7 @@ const DealRow = ({ d, reload }) => {
           <div className="flex gap-1"><dt className="font-semibold">Fetched:</dt><dd>{formatKolkata(d.created_at)}</dd></div>
           <div className="flex gap-1"><dt className="font-semibold">Source posted:</dt><dd>{formatKolkata(CONVERTER_SOURCES.includes(d.source) ? null : d.posted_at)}</dd></div>
         </dl>
-        <p className={`truncate font-mono text-[11px] ${d.converted ? "text-emerald-700" : "text-amber-600"}`}>
+        <p data-testid={`admin-deal-link-${d.id}`} className={`break-all font-mono text-[11px] ${d.converted ? "text-emerald-700" : "text-amber-600"}`}>
           {d.converted ? "Your affiliate link" : "Not converted"}: {d.affiliate_url}
         </p>
         {(d.offers || []).length > 0 && (
@@ -56,6 +57,7 @@ const DealRow = ({ d, reload }) => {
       <a href={d.affiliate_url || d.url} target="_blank" rel="noopener noreferrer" data-testid={`admin-deal-open-${d.id}`}
         className="grid h-9 place-items-center rounded-xl border border-slate-300 px-3 text-slate-800 hover:bg-slate-200"><ExternalLink className="h-4 w-4" /></a>
       <Button size="sm" className={ghostBtn} onClick={remove} data-testid={`admin-deal-delete-${d.id}`} aria-label="Delete"><Trash2 className="h-4 w-4" /></Button>
+      <ReviewEditor deal={d} reload={reload} />
     </div>
   );
 };
@@ -68,12 +70,12 @@ const inTab = (d, t) => t === "All" || (t === "Other" ? !MAJOR.includes(d.store)
 export const DealsTab = () => {
   const [list, setList] = useState([]);
   const [tab, setTab] = useState("All");
-  const load = () => api.get("/deals", { params: { limit: 500 } }).then((r) => setList(r.data));
+  const load = () => api.get("/review-deals").then((r) => setList(r.data)).catch(e => toast.error(errMsg(e)));
   useEffect(() => { load(); }, []);
   const shown = list.filter((d) => inTab(d, tab));
   return (
-    <Panel testid="admin-deals-panel" title="All deals" desc="Split by store. Star a deal to pin it in Best Deals. Best Deals also picks top-scoring drops automatically.">
-      <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto">
+    <Panel testid="admin-deals-panel" title="Review queue" desc="Drafts are private. Add original buying advice and verify the offer before publishing or sending to Telegram.">
+      <div className="mb-4 flex flex-wrap gap-2">
         {TABS.map((t) => (
           <button key={t} data-testid={`admin-store-tab-${t.toLowerCase()}`} onClick={() => setTab(t)}
             className={`flex shrink-0 items-center gap-2 rounded-full px-4 py-1.5 text-xs font-bold transition-colors ${tab === t ? "bg-slate-900 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-200"}`}>

@@ -4,10 +4,10 @@ import DealsPage from "@/views/DealsPage";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "DealLoot — Fresh loot deals, found for you" },
-      { name: "description", content: "Live 100% SuperCoin, gift card, price-drop, loot and gold deals from India's top deal channels, updated every few minutes." },
-      { property: "og:title", content: "DealLoot — Fresh loot deals, found for you" },
-      { property: "og:description", content: "Live SuperCoin, gift card, price-drop and loot deals, updated every few minutes." },
+      { title: "DealLoot — Shopping offers and buying guides" },
+      { name: "description", content: "Reviewed shopping offers and practical buying guides for India. Understand prices, rewards and offer conditions before buying." },
+      { property: "og:title", content: "DealLoot — Shopping offers and buying guides" },
+      { property: "og:description", content: "Shopping offers with original buying advice. Compare the conditions before you buy." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],

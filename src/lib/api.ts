@@ -8,7 +8,7 @@ async function request<T = any>(method: string, path: string, body?: unknown, op
     ? "?" + new URLSearchParams(Object.entries(opts.params).filter(([, v]) => v !== undefined && v !== null && v !== "").map(([k, v]) => [k, String(v)])).toString()
     : "";
   const [p, inlineQs] = path.split("?");
-  const url = `/api/public${p}${qs || (inlineQs ? `?${inlineQs}` : "")}`;
+  const url = `${process.env["REACT_APP_BACKEND_URL"]}/api/public${p}${qs || (inlineQs ? `?${inlineQs}` : "")}`;
   const headers: Record<string, string> = {};
   if (body !== undefined) headers["Content-Type"] = "application/json";
   const token = getToken();

@@ -4,12 +4,16 @@ services:
     name: dealloot
     runtime: node
     plan: free
-    buildCommand: npm install --include=dev && NITRO_PRESET=node-server npm run build
-    startCommand: node .output/server/index.mjs
+    buildCommand: yarn install --frozen-lockfile --production=false && node scripts/build-production.mjs
+    startCommand: node scripts/start-production.mjs
     healthCheckPath: /api/public/stats
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: NODE_ENV
+        value: production
       - key: MONGO_URL
         sync: false
       - key: DB_NAME
@@ -20,6 +24,8 @@ services:
         generateValue: true
       - key: CRON_SECRET
         generateValue: true
+      - key: EXTRAPE_SESSION_SECRET
+        sync: false
 
-  # Use an external scheduler to wake the free web service without a paid Render cron job.
-  # Call GET /api/public/cron/fetch?key=<CRON_SECRET> every 15 minutes.
+  # Optional external scheduler: POST /api/public/cron/fetch with Authorization: Bearer <CRON_SECRET>.
+  # Source scans import drafts only. Never put the cron secret in a public URL.

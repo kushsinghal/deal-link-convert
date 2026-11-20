@@ -17,6 +17,8 @@ const nitroOptions = { alias: { "punycode/": punycode } } as unknown as { preset
 
 export default defineConfig({
   vite: {
+    server: { allowedHosts: [process.env["REACT_APP_BACKEND_URL"] && new URL(process.env["REACT_APP_BACKEND_URL"]).hostname, process.env["PREVIEW_ALLOWED_HOST"]].filter(Boolean) as string[] },
+    define: { "process.env.REACT_APP_BACKEND_URL": JSON.stringify(process.env["REACT_APP_BACKEND_URL"]) },
     resolve: {
       // The MongoDB driver's URL parser requires "punycode/" (the npm package, not the Node built-in).
       alias: [{ find: /^punycode\/$/, replacement: punycode }],

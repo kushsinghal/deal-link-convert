@@ -54,6 +54,8 @@ describe("Convert Links deal saving", () => {
     expect(state.deals[0]).toMatchObject({ clean_url: "https://www.amazon.in/dp/B000000001", affiliate_url: "https://ekaro.in/my-deal", converted: true, source: "Convert Links", price: 399, posted_to: [] });
     expect(result.items[0].deal_id).toBe(state.deals[0].id);
     expect(state.calls).toBe(1);
+    expect(state.deals[0]).toMatchObject({ publication_status: "draft", published_at: null, reviewed_at: null });
+    expect(state.logs).toHaveLength(0);
   });
   it("updates an existing deal rather than duplicating the same cleaned link", async () => {
     await convertBulk({ text }); await convertBulk({ text });
@@ -75,45 +77,52 @@ describe("Convert Links deal saving", () => {
 });
 
 describe("Website publication", () => {
-  it("publishes a successful conversion once and sets its publication time", async () => {
+  it("saves a successful conversion once as a private draft", async () => {
     const a = await publish({ source: "Telegram converter" });
     const b = await publish({ source: "Telegram converter" });
     expect(state.deals).toHaveLength(1);
     expect(a.deal_id).toBe(state.deals[0].id);
     expect(b.deal_id).toBe(a.deal_id);
-    expect(state.deals[0]).toMatchObject({ source: "Telegram converter", published_at: expect.any(String) });
+    expect(state.deals[0]).toMatchObject({ source: "Telegram converter", publication_status: "draft", published_at: null });
   });
   it("does not publish a failed or unchanged conversion", async () => {
     expect(await publish({ error: "Provider unavailable" })).toEqual({ deal_id: null, save_error: null });
     expect(await publish({ converted: CLEAN })).toEqual({ deal_id: null, save_error: null });
     expect(state.deals).toHaveLength(0);
   });
-  it("keeps original posted and publication times on reconversion", async () => {
+  it("keeps original source times but requires review again on reconversion", async () => {
     const old = "2020-01-01T00:00:00.000Z";
     await convertBulk({ text });
     Object.assign(state.deals[0], { posted_at: old, published_at: old, created_at: old });
     await convertBulk({ text });
     expect(state.deals).toHaveLength(1);
-    expect(state.deals[0]).toMatchObject({ posted_at: old, published_at: old, created_at: old, converted_at: expect.any(String) });
+    expect(state.deals[0]).toMatchObject({ posted_at: old, published_at: null, publication_status: "draft", created_at: old, converted_at: expect.any(String) });
     expect(state.deals[0].converted_at).not.toBe(old);
   });
   it("does not invent a publication time for historical deals", async () => {
     state.deals.push({ id: "old", clean_url: CLEAN, posted_at: "2020-01-01T00:00:00.000Z" });
     await publish();
-    expect(state.deals[0].published_at).toBeUndefined();
+    expect(state.deals[0].published_at).toBeNull();
     expect(formatKolkata(state.deals[0].published_at)).toBe("Unknown");
   });
 });
 
 describe("Telegram posting timestamps", () => {
+  it("rejects a private draft before contacting Telegram", async () => {
+    await publish();
+    await expect(repost(state.deals[0].id, "dest-1")).rejects.toMatchObject({ status: 400 });
+    expect(state.logs).toHaveLength(0);
+  });
   it("records sent time and message ID only for a successful post", async () => {
     await publish();
+    state.deals[0].publication_status = "published";
     await repost(state.deals[0].id, "dest-1");
     expect(state.logs[0]).toMatchObject({ status: "success", message_id: 77, sent_at: expect.any(String) });
     expect(state.deals[0].telegram_posted_at).toBe(state.logs[0].sent_at);
   });
   it("gives a failed post no success time", async () => {
     await publish();
+    state.deals[0].publication_status = "published";
     state.sendFail = true;
     await repost(state.deals[0].id, "dest-1");
     expect(state.logs[0]).toMatchObject({ status: "failed", sent_at: null, message_id: null });

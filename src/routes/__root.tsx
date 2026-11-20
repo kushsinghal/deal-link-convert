@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { Navbar } from "@/components/Navbar";
+import { SiteFooter } from "@/components/SiteFooter";
 import { Toaster } from "@/components/ui/sonner";
 import { loadPrefs } from "@/lib/share";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -92,9 +93,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "DealLoot" },
-      { name: "description", content: "Live loot deals from India's top deal channels." },
-      { property: "og:title", content: "DealLoot — Fresh loot deals" },
-      { property: "og:description", content: "Live SuperCoin, gift card, price-drop and loot deals from India's top deal channels." },
+      { name: "description", content: "Shopping deals and practical buying guides for readers in India. Compare offer conditions before you buy." },
+      { property: "og:title", content: "DealLoot — Shopping offers and buying guides" },
+      { property: "og:description", content: "Compare shopping offers, understand the conditions and explore practical buying guides." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
     ],
@@ -144,6 +145,7 @@ function RootComponent() {
         <Navbar />
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
+        <SiteFooter />
         <Toaster theme="light" position="bottom-right" />
       </div>
     </QueryClientProvider>

@@ -1,0 +1,5 @@
+{
+  "name": "dealloot-preview",
+  "private": true,
+  "scripts": { "start": "node ../scripts/start-preview.mjs", "build": "cd .. && yarn install --frozen-lockfile && node scripts/build-production.mjs" }
+}

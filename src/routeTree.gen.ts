@@ -11,6 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as GuidesIndexRouteImport } from './routes/guides.index'
+import { Route as GuidesSlugRouteImport } from './routes/guides.$slug'
+import { Route as InfoPageRouteImport } from './routes/info.$page'
 import { Route as ApiPublicSplatRouteImport } from './routes/api/public/$'
 
 const IndexRoute = IndexRouteImport.update({
@@ -23,6 +26,21 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
+const GuidesIndexRoute = GuidesIndexRouteImport.update({
+  id: '/guides/',
+  path: '/guides/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const GuidesSlugRoute = GuidesSlugRouteImport.update({
+  id: '/guides/$slug',
+  path: '/guides/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InfoPageRoute = InfoPageRouteImport.update({
+  id: '/info/$page',
+  path: '/info/$page',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicSplatRoute = ApiPublicSplatRouteImport.update({
   id: '/api/public/$',
   path: '/api/public/$',
@@ -32,30 +50,61 @@ const ApiPublicSplatRoute = ApiPublicSplatRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/guides/$slug': typeof GuidesSlugRoute
+  '/info/$page': typeof InfoPageRoute
+  '/guides/': typeof GuidesIndexRoute
   '/api/public/$': typeof ApiPublicSplatRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/guides/$slug': typeof GuidesSlugRoute
+  '/info/$page': typeof InfoPageRoute
+  '/guides': typeof GuidesIndexRoute
   '/api/public/$': typeof ApiPublicSplatRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/guides/$slug': typeof GuidesSlugRoute
+  '/info/$page': typeof InfoPageRoute
+  '/guides/': typeof GuidesIndexRoute
   '/api/public/$': typeof ApiPublicSplatRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/api/public/$'
+  fullPaths:
+    | '/'
+    | '/admin'
+    | '/guides/$slug'
+    | '/info/$page'
+    | '/guides/'
+    | '/api/public/$'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/api/public/$'
-  id: '__root__' | '/' | '/admin' | '/api/public/$'
+  to:
+    | '/'
+    | '/admin'
+    | '/guides/$slug'
+    | '/info/$page'
+    | '/guides'
+    | '/api/public/$'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/guides/$slug'
+    | '/info/$page'
+    | '/guides/'
+    | '/api/public/$'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  GuidesSlugRoute: typeof GuidesSlugRoute
+  InfoPageRoute: typeof InfoPageRoute
+  GuidesIndexRoute: typeof GuidesIndexRoute
   ApiPublicSplatRoute: typeof ApiPublicSplatRoute
 }
 
@@ -75,6 +124,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/guides/': {
+      id: '/guides/'
+      path: '/guides'
+      fullPath: '/guides/'
+      preLoaderRoute: typeof GuidesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/guides/$slug': {
+      id: '/guides/$slug'
+      path: '/guides/$slug'
+      fullPath: '/guides/$slug'
+      preLoaderRoute: typeof GuidesSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/info/$page': {
+      id: '/info/$page'
+      path: '/info/$page'
+      fullPath: '/info/$page'
+      preLoaderRoute: typeof InfoPageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/$': {
       id: '/api/public/$'
       path: '/api/public/$'
@@ -88,6 +158,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  GuidesSlugRoute: GuidesSlugRoute,
+  InfoPageRoute: InfoPageRoute,
+  GuidesIndexRoute: GuidesIndexRoute,
   ApiPublicSplatRoute: ApiPublicSplatRoute,
 }
 export const routeTree = rootRouteImport

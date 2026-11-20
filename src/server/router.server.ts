@@ -29,6 +29,7 @@ export async function handle(request: Request, splat: string) {
     const t = await request.text();
     if (t) {
       try { body = JSON.parse(t); } catch { return json({ detail: "Invalid JSON" }, 400); }
+      if (!body || typeof body !== "object" || Array.isArray(body)) return json({ detail: "Send a JSON object" }, 400);
     }
   }
   const qp = (k: string) => url.searchParams.get(k);
@@ -83,12 +84,18 @@ export async function handle(request: Request, splat: string) {
     }
     if (method === "GET") {
       if (a === "lookup") return json(await core.lookup(qp("url") || ""));
+      if (a === "review-deals") return json(await (await import("./review.server")).reviewDeals());
       if (a === "sources") return json(await core.listSources());
       if (a === "destinations") return json(await core.listDestinations());
       if (a === "settings") return json(await core.readSettings());
       if (a === "logs") return json(await core.logs(Number(qp("limit") || 200)));
     }
     if (method === "POST") {
+      if (a === "sources" && b === "test-all") return json(await (await import("./source-health.server")).testAllSources());
+      if (a === "sources" && b && c === "test") {
+        const result = await (await import("./source-health.server")).testSource(b);
+        return result ? json(result) : json({ detail: "Source not found" }, 404);
+      }
       if (a === "deals" && b === "reconvert") return json(await core.reconvert());
       if (a === "deals" && !b) return json(await core.addDeal(body));
       if (a === "deals" && b && c === "post") return json(await core.repost(b, qp("destination_id")));
@@ -103,6 +110,12 @@ export async function handle(request: Request, splat: string) {
       if (a === "telegram" && b === "chats") return json(await core.findChats(body));
     }
     if (method === "PUT") {
+      if (a === "deals" && b && c === "review") {
+        try {
+          const saved = await (await import("./review.server")).saveReview(b, body);
+          return saved ? json({ ok: true }) : json({ detail: "Deal not found" }, 404);
+        } catch (error) { return json({ detail: error.message }, 400); }
+      }
       if (a === "deals" && b && c === "feature") return json(await core.featureDeal(b, body.featured));
       if (a === "sources" && b) return json(await core.updateSource(b, body));
       if (a === "destinations" && b) return json(await core.updateDestination(b, body));

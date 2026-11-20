@@ -45,7 +45,7 @@ function AdminGate() {
   return (
     <>
       <div className="mx-auto flex max-w-7xl justify-end px-4 pt-4 sm:px-8">
-        <button className="text-xs font-semibold text-slate-500 underline" onClick={signOut}>Sign out</button>
+        <button data-testid="admin-sign-out" className="text-xs font-semibold text-slate-500 underline" onClick={signOut}>Sign out</button>
       </div>
       <AdminPage />
     </>
@@ -77,8 +77,8 @@ function SignIn({ onDone }: { onDone: (t: string) => void }) {
       <p className="mt-2 text-sm text-slate-600">Only the site admin can manage sources, channels and links.</p>
       <div className="mt-6 rounded-2xl border border-slate-300 bg-white p-6">
         <form onSubmit={submit} className="space-y-3">
-          <Input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Admin password" className={field} />
-          <Button type="submit" disabled={busy} className={`w-full ${primary}`}>{busy ? "…" : "Sign in"}</Button>
+          <Input data-testid="admin-password-input" aria-label="Admin password" type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Admin password" className={field} />
+          <Button data-testid="admin-login-submit" type="submit" disabled={busy} className={`w-full ${primary}`}>{busy ? "…" : "Sign in"}</Button>
         </form>
       </div>
     </main>

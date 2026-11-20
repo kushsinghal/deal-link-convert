@@ -24,12 +24,12 @@ export default function AdminPage() {
   return (
     <main className="mx-auto max-w-7xl px-4 py-8 sm:px-8 sm:py-12">
       <p className="font-mono text-xs uppercase tracking-[0.25em] text-[#B7791F]">Control room</p>
-      <h1 className="mt-3 text-4xl font-black tracking-tight sm:text-5xl">Fetch. Filter. Fire.</h1>
+      <h1 className="mt-3 text-4xl font-black sm:text-5xl">Find. Review. Publish.</h1>
       <p className="mt-3 max-w-2xl text-sm text-slate-600 sm:text-base">
         Choose where deals come from, what counts as a deal, and which Telegram channel gets which kind of drop.
       </p>
       <Tabs defaultValue="bulk" className="mt-8">
-        <TabsList className="no-scrollbar flex h-auto w-full justify-start gap-1 overflow-x-auto rounded-2xl border border-slate-200 bg-white p-1.5">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-lg border border-slate-200 bg-white p-1.5">
           {TABS.map(([k, label]) => (
             <TabsTrigger key={k} value={k} data-testid={`admin-tab-${k}`}
               className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold text-slate-600 transition-colors hover:text-slate-950 data-[state=active]:bg-slate-900 data-[state=active]:text-white">

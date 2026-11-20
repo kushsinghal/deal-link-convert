@@ -1,6 +1,7 @@
 // @ts-nocheck — port of the original backend endpoints onto Lovable Cloud tables.
 import * as engine from "./engine.server";
 import { convertAffiliate } from "./affiliate.server";
+import { normalizeSource } from "./source-input.server";
 
 export class HttpError extends Error {
   status: number;
@@ -46,7 +47,7 @@ async function check(res: any) {
 export async function getSettings() {
   const db = await getDb();
   const row = await check(await db.from("settings").select("*").eq("id", "main").maybeSingle());
-  return { ...DEFAULT_SETTINGS, ...(row || {}) };
+  return { ...DEFAULT_SETTINGS, ...(row || {}), ...(process.env.EXTRAPE_SESSION_SECRET ? { extrape_token: process.env.EXTRAPE_SESSION_SECRET, extrape_managed: true } : {}) };
 }
 
 async function updateSettings(patch: any) {
@@ -74,6 +75,7 @@ function destMatches(dest: any, deal: any) {
 }
 
 async function postDeal(deal: any, destId?: string | null) {
+  if (deal.publication_status !== "published") return [];
   const db = await getDb();
   let q = db.from("destinations").select("*").order("created_at");
   q = destId ? q.eq("id", destId) : q.eq("enabled", true);
@@ -240,14 +242,15 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
   }
   if (deal.split) await fillSplitInfo(deal);
   if (!deal.image && !deal.clean_url.includes("flipkart")) deal.image = await engine.fetchOgImage(deal.clean_url);
-  await recordPrice(deal);
+  // Price-history observations are recorded only when an editor publishes the deal.
   deal.affiliate_url = await safeConvert(deal.clean_url, settings);
   deal.converted = deal.affiliate_url !== deal.clean_url;
   deal.featured = false;
+  deal.publication_status = "draft";
   deal.score = engine.score(deal);
   const allowed = ["id", "dedupe_key", "title", "text", "note", "url", "clean_url", "affiliate_url", "converted", "store", "price", "mrp", "discount",
     "text_price", "text_mrp", "categories", "image", "source", "source_id", "source_post_url", "posted_to", "posted_at", "created_at", "title_key",
-    "product_key", "offers", "featured", "score", "lowest_ever", "history_count", "lowest_seen", "highest_seen", "split", "split_index", "split_total", "post_title"];
+    "product_key", "offers", "featured", "score", "lowest_ever", "history_count", "lowest_seen", "highest_seen", "split", "split_index", "split_total", "post_title", "publication_status"];
   const row = Object.fromEntries(allowed.filter((k) => deal[k] !== undefined).map((k) => [k, deal[k]]));
   const r = await db.from("deals").insert(row);
   if (r.error) {
@@ -387,7 +390,7 @@ export async function fetchSourceById(sourceId: string, runId?: string | null) {
 }
 
 // ---------- Public reads ----------
-const DEAL_COLS = "id,title,text,note,url,clean_url,affiliate_url,converted,store,price,mrp,discount,store_price,categories,image,source,source_id,source_post_url,posted_to,posted_at,created_at,product_key,offers,featured,score,lowest_ever,history_count,lowest_seen,highest_seen,ph_min,ph_max,ph_avg,ph_url,split,split_index,split_total,published_at,converted_at,telegram_posted_at";
+const DEAL_COLS = "id,title,text,note,url,clean_url,affiliate_url,converted,store,price,mrp,discount,store_price,categories,image,source,source_id,source_post_url,posted_to,posted_at,created_at,product_key,offers,featured,score,lowest_ever,history_count,lowest_seen,highest_seen,ph_min,ph_max,ph_avg,ph_url,split,split_index,split_total,published_at,converted_at,telegram_posted_at,publication_status,editorial_note,reviewed_at";
 
 const ilikeSafe = (q: string) => q.replace(/[%_,()*\\"]/g, " ").trim();
 
@@ -398,7 +401,7 @@ export async function listDeals(p: any) {
   const { category, q, store } = p;
   const sort = p.sort || "latest";
   const limit = Math.min(Number(p.limit) || 120, 500);
-  let query = db.from("deals").select(DEAL_COLS);
+  let query = db.from("deals").select(DEAL_COLS).eq("publication_status", "published");
   const applyStore = (qq) => (store ? (store === "Other" ? qq.not("store", "in", `(${MAJOR_STORES.join(",")})`) : qq.eq("store", store)) : qq);
   const applyQ = (qq) => {
     const t = q ? ilikeSafe(q) : "";
@@ -433,7 +436,7 @@ export async function listDeals(p: any) {
 
 export async function originalPost(id: string) {
   const db = await getDb();
-  const d = await check(await db.from("deals").select("source,posted_at,text,note,image,source_post_url").eq("id", id).maybeSingle());
+  const d = await check(await db.from("deals").select("source,posted_at,text,note,image,source_post_url").eq("id", id).eq("publication_status", "published").maybeSingle());
   if (!d) throw new HttpError(404, "Deal not found");
   const web = d.source_post_url;
   const m = (web || "").match(/https:\/\/t\.me\/(?:s\/)?(\w+)\/(\d+)/);
@@ -442,14 +445,15 @@ export async function originalPost(id: string) {
 
 export async function priceHistory(id: string) {
   const db = await getDb();
-  const deal = await check(await db.from("deals").select("*").eq("id", id).maybeSingle());
+  const deal = await check(await db.from("deals").select("*").eq("id", id).eq("publication_status", "published").maybeSingle());
   if (!deal) throw new HttpError(404, "Deal not found");
-  const pts = deal.product_key ? await check(await db.from("price_history").select("price,at").eq("product_key", deal.product_key).order("at").limit(500)) : [];
+  const published = deal.product_key ? await check(await db.from("deals").select("id").eq("product_key", deal.product_key).eq("publication_status", "published").limit(500)) : [];
+  const pts = published.length ? await check(await db.from("price_history").select("price,at").eq("product_key", deal.product_key).in("deal_id", published.map(d => d.id)).order("at").limit(500)) : [];
   const stores: any[] = [];
   const candidates = [deal];
   const tk = (deal.title_key || "").slice(0, 18);
   if (tk.length >= 10) {
-    const others = await check(await db.from("deals").select("*").like("title_key", `${tk}%`).neq("store", deal.store || "").neq("id", id).limit(5));
+    const others = await check(await db.from("deals").select("*").eq("publication_status", "published").like("title_key", `${tk}%`).neq("store", deal.store || "").neq("id", id).limit(5));
     const seenStores = new Set([deal.store]);
     for (const o of others) if (!seenStores.has(o.store)) { seenStores.add(o.store); candidates.push(o); }
   }
@@ -473,7 +477,7 @@ export async function stats() {
   const db = await getDb();
   const st = await getSettings();
   const cutoff = ago(st.website_max_age_hours * 3600e3);
-  const count = async (fn) => (await fn(db.from("deals").select("id", { count: "exact", head: true }))).count || 0;
+  const count = async (fn) => (await fn(db.from("deals").select("id", { count: "exact", head: true }).eq("publication_status", "published"))).count || 0;
   const vis = (q) => q.or(`posted_at.gte.${cutoff},featured.eq.true`);
   const win = Number(st.telegram_max_age_minutes) || 60;
   const out: any = { website_max_age_hours: st.website_max_age_hours };
@@ -492,7 +496,7 @@ export async function stats() {
   out.check_interval_seconds = st.check_interval_seconds;
   out.fresh_window_minutes = win;
   out.fresh_3h = fresh;
-  const latest = (await check(await db.from("deals").select("posted_at").order("posted_at", { ascending: false }).limit(1)))[0];
+  const latest = (await check(await db.from("deals").select("posted_at").eq("publication_status", "published").order("posted_at", { ascending: false }).limit(1)))[0];
   out.latest_deal_at = latest?.posted_at || null;
   return out;
 }
@@ -517,7 +521,7 @@ function previewHtml(url: string, title: string, image: string, price?: number, 
 
 export async function goDeal(id: string) {
   const db = await getDb();
-  const d = await check(await db.from("deals").select("*").eq("id", id).maybeSingle());
+  const d = await check(await db.from("deals").select("*").eq("id", id).eq("publication_status", "published").maybeSingle());
   if (!d) throw new HttpError(404, "Deal not found");
   return previewHtml(d.affiliate_url || d.url, d.title, d.image, d.price, d.mrp, d.store);
 }
@@ -552,6 +556,11 @@ export async function lookup(url: string) {
 }
 
 export async function addDeal(body: any) {
+  if (!body || typeof body.url !== "string" || !body.url.trim()) throw new HttpError(400, "Enter a full product URL before saving a deal.");
+  try { body = { ...body, url: normalizeSource("rss", body.url) }; } catch (e) { throw new HttpError(400, e.message); }
+  for (const field of ["price", "mrp", "discount"]) if (body[field] != null && (typeof body[field] !== "number" || !Number.isFinite(body[field]) || body[field] < 0)) throw new HttpError(400, `${field} must be a non-negative number.`);
+  for (const field of ["title", "note", "image"]) if (body[field] != null && typeof body[field] !== "string") throw new HttpError(400, `${field} must be text.`);
+  if (body.categories != null && (!Array.isArray(body.categories) || body.categories.some(c => !engine.CATEGORIES.includes(c)))) throw new HttpError(400, "Choose valid deal categories.");
   const settings = await getSettings();
   const text = [body.title, body.note].filter(Boolean).join(" ");
   const price = body.price ?? null, mrp = body.mrp ?? null;
@@ -572,6 +581,7 @@ export async function repost(id: string, destinationId?: string | null) {
   const db = await getDb();
   let deal = await check(await db.from("deals").select("*").eq("id", id).maybeSingle());
   if (!deal) throw new HttpError(404, "Deal not found");
+  if (deal.publication_status !== "published") throw new HttpError(400, "Review and publish this draft before sending it to Telegram.");
   if (!deal.converted || deal.affiliate_url === deal.clean_url) {
     const result = await convertAffiliate(deal.clean_url || deal.url, await getSettings());
     if (result.changed) {
@@ -597,6 +607,10 @@ export async function deleteDeal(id: string) {
 }
 
 export async function listSources() {
+  const { mongo } = await import("./db.server");
+  const collection = (await mongo()).collection("sources");
+  const legacy = await collection.find({ id: { $exists: false } }, { projection: { _id: 1 } }).limit(200).toArray();
+  for (const row of legacy) await collection.updateOne({ _id: row._id, id: { $exists: false } }, { $set: { id: uuid(), created_at: now() } });
   const db = await getDb();
   return check(await db.from("sources").select("*").order("created_at", { ascending: false }).limit(200));
 }
@@ -606,16 +620,21 @@ export async function addSource(body: any) {
   const kind = body.kind || "telegram";
   let value = String(body.value || "").trim();
   if (!value) throw new HttpError(400, "Enter a channel or link");
-  if (kind === "telegram") value = value.replace("https://", "").replace("t.me/s/", "").replace("t.me/", "").replace(/^@+/, "").replace(/^\/+|\/+$/g, "");
+  try { value = normalizeSource(kind, value); } catch (e) { throw new HttpError(400, e.message); }
   const dup = await check(await db.from("sources").select("id").ilike("value", value.replace(/[%_]/g, "\\$&")).limit(1));
   if (dup.length) throw new HttpError(400, "Source already added");
   const name = body.name || (kind === "telegram" ? `@${value}` : value.replace(/^https?:\/\/(www\.)?/, "").split("/")[0] + (kind === "web" ? " (website)" : ""));
-  return check(await db.from("sources").insert({ name, kind, value, enabled: body.enabled !== false }).select("*").single());
+  return check(await db.from("sources").insert({ id: uuid(), created_at: now(), name, kind, value, enabled: body.enabled !== false }).select("*").single());
 }
 
 export async function updateSource(id: string, body: any) {
   const db = await getDb();
-  return check(await db.from("sources").update({ enabled: body.enabled !== false, name: body.name || body.value }).eq("id", id).select("*").maybeSingle());
+  const patch: any = {};
+  if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
+  if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 160);
+  const row = await check(await db.from("sources").update(patch).eq("id", id).select("*").maybeSingle());
+  if (!row) throw new HttpError(404, "Source not found");
+  return row;
 }
 
 export async function deleteSource(id: string) {
@@ -682,7 +701,7 @@ export async function sendRecent(id: string) {
   const d = await check(await db.from("destinations").select("*").eq("id", id).maybeSingle());
   if (!d) throw new HttpError(404, "Destination not found");
   const s = await getSettings();
-  const deals = await check(await db.from("deals").select("*").gte("posted_at", ago(s.telegram_max_age_minutes * 60e3)).order("posted_at", { ascending: false }).limit(500));
+  const deals = await check(await db.from("deals").select("*").eq("publication_status", "published").gte("posted_at", ago(s.telegram_max_age_minutes * 60e3)).order("posted_at", { ascending: false }).limit(500));
   const match = deals.filter((x) => !(x.posted_to || []).includes(d.name) && destMatches(d, x)).slice(0, Number(s.max_posts_per_update) || 20);
   let sent = 0, failed = 0;
   for (const x of match) {
@@ -755,14 +774,14 @@ async function saveConvertedDeal(clean: string, affiliate: string, info: any, co
     affiliate_url: affiliate, converted: true, store: engine.detectStore(clean), price, mrp, discount,
     text_price: price, text_mrp: mrp, store_price: info.store_price ?? null,
     categories: categories.length ? categories : existing?.categories?.length ? existing.categories : ["heavy_discount"],
-    image: info.image || existing?.image || null, offers: info.offers || [], converted_at: timestamp,
+    image: info.image || existing?.image || null, offers: info.offers || [], converted_at: timestamp, publication_status: "draft", published_at: null, reviewed_at: null,
     title_key: titleKey(title), product_key: engine.productKey(clean) };
   if (existing) {
     await check(await db.from("deals").update({ ...row, score: engine.score(row) }).eq("id", existing.id));
     return existing.id;
   }
   const deal = { ...row, id: uuid(), dedupe_key: `convert:${clean}`, source, source_id: "manual",
-    posted_at: timestamp, published_at: timestamp, created_at: timestamp, posted_to: [], featured: false, score: engine.score(row) };
+    posted_at: timestamp, created_at: timestamp, posted_to: [], featured: false, score: engine.score(row) };
   await check(await db.from("deals").insert(deal));
   return deal.id;
 }

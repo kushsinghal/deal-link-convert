@@ -1,0 +1,72 @@
+[
+  {
+    "input": "@telegram",
+    "id": "cb49e73b-5a4e-49fb-9aa0-bacd601cb7f1",
+    "name": "TEST_diagnostic_telegram_0",
+    "status": "ok",
+    "posts": 20,
+    "message": "20 posts readable. No deals imported or sent.",
+    "checked_at": "2026-11-20T10:31:54.379Z",
+    "latency_ms": 454
+  },
+  {
+    "input": "https://www.dealsheaven.in/feed",
+    "id": "09377bb0-66da-4fc7-80af-42324c8a6816",
+    "name": "TEST_diagnostic_rss_1",
+    "status": "error",
+    "posts": 0,
+    "message": "HTTP 404",
+    "checked_at": "2026-11-20T10:31:55.056Z",
+    "latency_ms": 1334
+  },
+  {
+    "input": "https://feeds.bbci.co.uk/news/rss.xml",
+    "id": "392ed296-1b94-4375-a3ac-3299c9bf7039",
+    "name": "TEST_diagnostic_rss_2",
+    "status": "ok",
+    "posts": 33,
+    "message": "33 posts readable. No deals imported or sent.",
+    "checked_at": "2026-11-20T10:31:56.606Z",
+    "latency_ms": 86
+  },
+  {
+    "input": "https://www.desidime.com/",
+    "id": "7e40f668-fff5-443d-9147-44d1ea34208d",
+    "name": "TEST_diagnostic_web_3",
+    "status": "error",
+    "posts": 0,
+    "message": "HTTP 403",
+    "checked_at": "2026-11-20T10:31:56.924Z",
+    "latency_ms": 113
+  },
+  {
+    "input": "https://www.dealsmagnet.com/",
+    "id": "769e69a6-3d4e-495d-b598-670e8d12e5c3",
+    "name": "TEST_diagnostic_web_4",
+    "status": "ok",
+    "posts": 5,
+    "message": "5 posts readable. No deals imported or sent.",
+    "checked_at": "2026-11-20T10:31:57.254Z",
+    "latency_ms": 1753
+  },
+  {
+    "input": "https://www.dealsheaven.in/",
+    "id": "a38a5ac2-17e3-4f63-bdf0-927d587fdbfa",
+    "name": "TEST_diagnostic_rss_5",
+    "status": "error",
+    "posts": 0,
+    "message": "This URL returned a web page, not an RSS/Atom feed. Use the site's feed URL.",
+    "checked_at": "2026-11-20T10:31:59.239Z",
+    "latency_ms": 2931
+  },
+  {
+    "input": "@TEST_nonpublic_7e491",
+    "id": "43d9206a-e707-42fd-ae0b-7858ea49d1c8",
+    "name": "TEST_diagnostic_telegram_6",
+    "status": "error",
+    "posts": 0,
+    "message": "@TEST_nonpublic_7e491: public preview unavailable. Check the channel name and whether it is public.",
+    "checked_at": "2026-11-20T10:32:02.399Z",
+    "latency_ms": 672
+  }
+]

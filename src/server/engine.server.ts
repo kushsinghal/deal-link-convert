@@ -1,6 +1,7 @@
 // @ts-nocheck — direct port of the original Python deal engine (parsing, cleaning, conversion, Telegram posting).
 import { parse as parseHtml } from "node-html-parser";
-import { XMLParser } from "fast-xml-parser";
+import { XMLParser, XMLValidator } from "fast-xml-parser";
+import { normalizeTelegram } from "./source-input.server";
 
 export const UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36" };
 const URL_SRC = String.raw`https?:\/\/[^\s<>"')\]]+`;
@@ -301,12 +302,15 @@ function strippedStrings(el: any): string[] {
 }
 
 export async function fetchTelegram(username: string) {
-  username = username.trim().replace(/^@/, "").replace("https://t.me/", "").replace("s/", "").replace(/^\/+|\/+$/g, "");
+  username = normalizeTelegram(username);
   const r = await fetchText(`https://t.me/s/${username}`);
   if (!r.ok) throw new Error(`HTTP ${r.status} for t.me/s/${username}`);
   const root = parseHtml(await r.text());
   const msgs = root.querySelectorAll("div.tgme_widget_message");
-  if (!msgs.length) throw new Error(`@${username} is not a public channel or has no posts`);
+  if (!msgs.length) {
+    if (root.querySelector(".tgme_channel_info_header")) return [];
+    throw new Error(`@${username}: public preview unavailable. Check the channel name and whether it is public.`);
+  }
   const items: any[] = [];
   for (const m of msgs) {
     const body = m.querySelector(".tgme_widget_message_text");
@@ -334,10 +338,14 @@ const htmlToText = (h: string) => parseHtml((h || "").replace(/<[^>]+>/g, " ")).
 export async function fetchRss(url: string) {
   const r = await fetchText(url);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const xml = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" }).parse(await r.text());
+  const text = await r.text();
+  if (/<!doctype\s+html|<html[\s>]/i.test(text.slice(0, 2000))) throw new Error("This URL returned a web page, not an RSS/Atom feed. Use the site's feed URL.");
+  if (XMLValidator.validate(text) !== true) throw new Error("The source returned malformed XML. Check the feed URL or try again later.");
+  const xml = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" }).parse(text);
+  if (!xml?.rss?.channel && !xml?.feed && !xml?.["rdf:RDF"]) throw new Error("The source is not an RSS or Atom feed.");
   const arr = (x: any) => (x == null ? [] : Array.isArray(x) ? x : [x]);
   const str = (x: any) => (x == null ? "" : typeof x === "object" ? x["#text"] ?? x["@_href"] ?? "" : String(x));
-  const rssItems = arr(xml?.rss?.channel?.item);
+  const rssItems = arr(xml?.rss?.channel?.item ?? xml?.["rdf:RDF"]?.item);
   const atomItems = arr(xml?.feed?.entry);
   const items: any[] = [];
   for (const e of [...rssItems, ...atomItems].slice(0, 40)) {
@@ -603,11 +611,14 @@ async function convertWithExtraPe(url: string, settings: any) {
   const raw = await r.text();
   let data: any;
   try { data = raw ? JSON.parse(raw) : {}; } catch { data = { data: raw }; }
-  if (!r.ok || data?.success === false) {
-    throw new Error(`ExtraPe: ${data?.errorCode || data?.errorMessage || data?.message || `converter failed (${r.status})`} (check the link, or save a fresh ExtraPe access token)`);
+  if (!r.ok || data?.errorCode || data?.success === false || data?.errorMessage) {
+    if (/amazon.*(?:program|tag|associate)/i.test(data?.errorMessage || "")) throw new Error("ExtraPe: Amazon conversion requires approval for ExtraPe's Amazon program or your own Amazon Associates tag in ExtraPe. No earning link was created.");
+    throw new Error(`ExtraPe conversion was rejected (${data?.errorCode || r.status}). Check account permissions and the product link; the token may need renewing.`);
   }
-  const payload = data?.convertedText ?? data?.outputText ?? data?.data ?? data;
-  const candidate = findUrls(typeof payload === "string" ? payload : JSON.stringify(payload)).find((link) => link !== url);
+  const payload = data?.convertedText ?? data?.outputText ?? data?.data;
+  let output = typeof payload === "string" ? payload : "";
+  if (/https?%3A%2F%2F/i.test(output)) { try { output = decodeURIComponent(output); } catch { throw new Error("ExtraPe returned a malformed link."); } }
+  const candidate = findUrls(output).map(link => link.replace(/[.,;!]+$/, "")).find((link) => link !== url && !link.startsWith(url + "#"));
   if (!candidate) throw new Error("ExtraPe returned no converted link (check your access token)");
   return candidate;
 }

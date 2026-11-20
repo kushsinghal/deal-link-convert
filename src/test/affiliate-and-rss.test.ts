@@ -29,7 +29,7 @@ describe("affiliate routing", () => {
 
   it("reports ExtraPe errors when no EarnKaro backup exists", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ success: false, errorCode: "Invalid Url" }), { status: 200 })));
-    await expect(engine.convertLink("https://www.flipkart.com/item/p/itm123", { extrape_token: "ep" })).rejects.toThrow("ExtraPe: Invalid Url");
+    await expect(engine.convertLink("https://www.flipkart.com/item/p/itm123", { extrape_token: "ep" })).rejects.toThrow("ExtraPe conversion was rejected (Invalid Url)");
     await expect(engine.convertLink("https://www.flipkart.com/item/p/itm123", {})).rejects.toThrow("Add your ExtraPe access token");
   });
 
