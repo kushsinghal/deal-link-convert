@@ -49,7 +49,12 @@ export async function handle(request: Request, splat: string) {
         if (!verifyCronRequest(request)) return json({ detail: "Unauthorized" }, 401);
         return json(await core.startFetchAll(publicOrigin(url), { wait: true }));
       }
-      if (a === "deals" && !b) return json(await core.listDeals({ category: qp("category"), q: qp("q"), store: qp("store"), sort: qp("sort"), limit: qp("limit") }));
+      if (a === "deals" && !b) {
+        const isAdmin = await requireAdmin(request).then(() => true, () => false);
+        const rows = await core.listDeals({ category: qp("category"), q: qp("q"), store: qp("store"), sort: qp("sort"), limit: qp("limit") });
+        return json(isAdmin ? rows : rows.map(({ source, source_id, source_post_url, text, ...rest }: any) => rest));
+      }
+      if (a === "deals" && b && c === "original") await requireAdmin(request);
       if (a === "deals" && b && c === "original") return json(await core.originalPost(b));
       if (a === "price-history" && b) return json(await core.priceHistory(b));
       if (a === "stats") return json(await core.stats());
@@ -96,7 +101,7 @@ export async function handle(request: Request, splat: string) {
       if (a === "destinations") return json(await core.listDestinations());
       if (a === "settings") return json(await core.readSettings());
       if (a === "logs") return json(await core.logs(Number(qp("limit") || 200)));
-      if (a === "converter-logs") return json(await (await import("./telegram-converter.server")).converterLogs(Number(qp("limit") || 200)));
+      if (a === "converter-logs") return json(await (await import("./telegram-converter.server")).converterLogs(Number(qp("limit")) || 200));
     }
     if (method === "POST") {
       if (a === "sources" && b === "test-all") return json(await (await import("./source-health.server")).testAllSources());

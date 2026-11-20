@@ -1,0 +1,37 @@
+{
+  "summary": "Tested all 8 requested items, and all passed. Vitest: 57/57 passed, including the /Radhe test. New pytest file: 6/6 passed. Converter-logs returns 401 without a token. With an admin token it returns 200, the TEST doc came back with no _id, and sorting by received_at works. GET /price-history shows the 'Seen on DealLoot' store name and no 'channel' wording. Cron tick returns 401 without the secret and 202 with it. None of the 120 public deals has a social clean_url. UI as a public visitor (localStorage cleared): the Deals and Guides nav links show and admin-dashboard-nav-link does not. Across 120 cards: 0 share buttons, 0 original-post buttons, 0 star buttons and 120 copy buttons, and deal-posted shows only 'posted Xm ago'. Copy put text on the clipboard that contains the grab href. The price-history dialog legend and card say 'Seen on DealLoot'. After /admin login with preview123, the Control Room nav link appears. On home, all 120 deal-posted texts show '@source · posted ...', there are 120 original-post buttons, and the original post dialog opens. Sign out hides the nav link and the original-post buttons again. The Converter History tab rendered the TEST_ doc with status, @store, sent/replied IST times, took 2.3s, and the Pasted/Clean/Your link rows. The Affiliate Setup Telegram panel shows the /Radhe instructions, the Site address input, and the auto-restore and alert wording. Live bot messaging was not tested. NOTE: this preview DB has a real converter bot token saved (@xtelgobot, status Connected, Site address https://deal-link-convert--...). The cron ticks I sent therefore called checkConverterHealth against real Telegram; no alert was sent because the webhook matched.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/public/deals (public)", "issue": "Source details are hidden only in the client. The public JSON still returns source, source_id, source_post_url (t.me/...) and the raw text, so anyone can read the source channel from the API. Strip these fields for non-admin requests if the goal is to really hide them."},
+      {"endpoint": "GET /api/public/converter-logs?limit=abc", "issue": "Number('abc') is NaN, so limit(NaN) returns [] instead of the default 200. Use Number(x) || 200, then clamp."},
+      {"endpoint": "core.server.ts social filter (~line 228)", "issue": "The regex misses wa.me, chat.whatsapp.com (whatsapp.com covers it), facebook.com/fb.me, threads.net and telegram.dog. wa.me is very common in deal posts."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Affiliate Setup / Home sort", "issues": ["The per-store route pickers and the home sort control are native browser <select> elements, not the shadcn Select. They work but look inconsistent with the rest of the UI."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iter5_converter_history_admin.py", "/app/test_reports/pytest/iteration_5.xml"],
+  "action_items": [
+    "Optional: strip source, source_id, source_post_url and text from public /deals responses when there is no admin token.",
+    "Optional: default the converter-logs limit when the value is NaN.",
+    "Optional: add wa.me, facebook.com, fb.me, threads.net and telegram.dog to the social-link ingest filter."
+  ],
+  "critical_code_review_comments": [
+    "Security: RADHE lets any Telegram chat that sends '/Radhe' to the bot register itself as connected. It can then use the owner's paid affiliate credentials and will receive the owner's alerts (notifyOwner sends to every connected chat). Anyone who learns the bot username gets this access, which defeats the 'Unknown chats cannot use...' guard. Consider limiting /Radhe to the first chat, or to a chat_id allowlist, or require the admin to approve new chats.",
+    "notifyOwner's alert dedup is check-then-set and not atomic. Two concurrent failures could both send the alert. This is low impact.",
+    "checkConverterHealth: if getWebhookInfo itself fails (for example the token was revoked), no 'Disconnected' message is sent, which is expected because the bot cannot send it. The failure is also not surfaced in the admin UI.",
+    "receiveConverter: if the sendMessage reply throws, no converter_logs entry is written and alertIfExtraPeKeyFailed is skipped for that message."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter5_converter_history_admin.py"],
+  "success_rate": {"backend": "100% (6/6 pytest, 57/57 vitest)", "frontend": "100%"},
+  "test_credentials": "/app/memory/test_credentials.md: /admin password preview123",
+  "seed_data_creation": "Temporary converter_logs docs (TEST_* ids) were inserted and then deleted. 0 TEST docs remain.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Mongo DB dealloot_preview. The converter_logs collection is sorted by received_at; to put a TEST doc first, give it received_at 2099. A real Telegram converter bot token is saved in settings (@xtelgobot, connected), so cron/tick calls real Telegram getWebhookInfo. Admin login testids: admin-password-input and admin-login-submit."
+}

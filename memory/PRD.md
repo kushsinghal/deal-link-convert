@@ -88,3 +88,11 @@
 - Auto-published deals record price_history; out-of-stock/expired/ended posts skipped.
 - Added user's ~40 sources. Broken: @hotdealsbywd, @tapworthy (preview disabled), desidime.com website x2 (HTTP 403).
 - Age limit kept at 24h (user choice). Tests: vitest 56/56; testing agent iteration_3/4 pass.
+
+## 2026-11-20 (fork 2, part 3) — Converter + public view
+- /Radhe (also @Radhe, radhe) connects a chat to the converter bot; old /connect code still works.
+- Bot notifies connected chats: Connected / Disconnected / auto-restored (cron tick runs checkConverterHealth) and ExtraPe key failure alert (throttled 6h) — converter_alerts collection.
+- converter_logs collection + "Converter History" admin tab (pasted, clean, your link, store, sent/replied time, duration).
+- Public: Control Room nav hidden until /admin login; share + original-post buttons removed; source names hidden (and stripped from public /deals API); /deals/:id/original admin-only; price history label "Seen on DealLoot".
+- Social/WhatsApp/nitter/x links no longer ingested as deals.
+- Tests: vitest 57/57; testing agent iteration_5 all pass.

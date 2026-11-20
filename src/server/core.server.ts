@@ -225,7 +225,7 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
     }
   }
   deal.clean_url = await engine.cleanLink(deal.url);
-  if (/^https?:\/\/([^/]*\.)?(whatsapp\.com|nitter\.[^/]+|x\.com|twitter\.com|instagram\.com|youtube\.com|youtu\.be|t\.me|telegram\.me)(\/|$)/i.test(deal.clean_url)) return null;
+  if (/^https?:\/\/([^/]*\.)?(whatsapp\.com|wa\.me|facebook\.com|fb\.me|threads\.net|telegram\.dog|nitter\.[^/]+|x\.com|twitter\.com|instagram\.com|youtube\.com|youtu\.be|t\.me|telegram\.me)(\/|$)/i.test(deal.clean_url)) return null;
   deal.offers = engine.markBestCard(engine.extractOffers(`${deal.text || ""}\n${deal.note || ""}`), deal.price);
   if (deal.store === "Other") deal.store = engine.detectStore(deal.clean_url, deal.text || "");
   deal.title_key = titleKey(deal.title);
