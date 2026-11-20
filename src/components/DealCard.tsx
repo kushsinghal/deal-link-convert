@@ -82,7 +82,7 @@ export const DealCard = ({ deal, index = 0, onChange }) => {
         <p data-testid={`deal-posted-${deal.id}`} className="font-mono text-[11px] text-slate-500">
           {admin ? `${deal.source} · ` : ""}posted {timeAgo(deal.posted_at || deal.created_at)}
         </p>
-        <p data-testid={`deal-disclosure-${deal.id}`} className="text-[11px] leading-5 text-slate-600">{deal.converted ? "Affiliate link · We may earn a commission." : "Retailer link · Not converted."} Price observed {timeAgo(deal.reviewed_at || deal.posted_at)}; check the retailer for today's price and conditions.</p>
+        {admin && <p data-testid={`deal-disclosure-${deal.id}`} className="text-[11px] font-semibold text-slate-600">{deal.converted ? "Converted link" : "Retailer link (not converted)"}</p>}
         <div className="mt-auto flex gap-1.5 pt-1">
           <a href={link} target="_blank" rel="sponsored noopener noreferrer" data-testid={`grab-deal-button-${deal.id}`}
             className="flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-slate-900 py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#FF5A1F]">

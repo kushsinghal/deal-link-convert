@@ -103,3 +103,5 @@
 - Navbar "Log out" button (data-testid admin-logout-button) shown only when signed in; old small Sign out link removed.
 - Vitest 57/57, tsc clean. Real Telegram round-trip timing NOT measured by agent (would message the owner's chat).
 - Backlog: Twitter/X API instead of Nitter (P1); social-link filter expansion (wa.me, facebook, threads, telegram.dog) (P2).
+- Fork 3 part 2: per-card link-type line is admin-only ("Converted link" / "Retailer link (not converted)"); page-top + footer disclosure kept. Unconverted deals stay public (user choice). Conversion chain now ExtraPe -> Sankmo -> EarnKaro (each only if token saved; Sankmo token NOT yet saved, so Sankmo backup untested live). Deals list no longer waits 200ms before first load. Vitest 58/58.
+- Note: 57 published Amazon deals are unconverted (ExtraPe Amazon needs approval / own Associates tag).

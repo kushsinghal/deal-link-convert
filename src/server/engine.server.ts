@@ -583,22 +583,29 @@ export function missingTokenError(route: string, settings: any) {
   return null;
 }
 
-// ExtraPe first; EarnKaro is the backup when ExtraPe has no token or fails.
+async function convertWithSankmo(url: string, settings: any) {
+  const r = await fetch("https://sankmo.in/api/convertMunafaLinks", {
+    method: "POST", body: new URLSearchParams({ text: url }), headers: { Authorization: `Bearer ${(settings.sankmo_token || "").trim()}` }, signal: AbortSignal.timeout(20000),
+  });
+  const data: any = await r.json().catch(() => ({}));
+  const found = findUrls((data && data.convertedText) || "");
+  if (r.ok && found.length && found[0] !== url) return found[0];
+  throw new Error(`Sankmo: ${data?.msg || "no converted link returned"}`);
+}
+
+// ExtraPe first, then Sankmo, then EarnKaro: each backup is used only when it has a token and the one before failed.
 async function convertWithDefault(url: string, settings: any) {
-  if (!(settings.extrape_token || "").trim()) {
-    if ((settings.earnkaro_token || "").trim()) return convertWithEarnKaro(url, settings);
-    throw new Error("Add your ExtraPe access token in Affiliate links settings");
+  const has = (k: string) => !!(settings[k] || "").trim();
+  const chain: [string, (u: string, s: any) => Promise<string>][] = [];
+  if (has("extrape_token")) chain.push(["ExtraPe", convertWithExtraPe]);
+  if (has("sankmo_token")) chain.push(["Sankmo backup", convertWithSankmo]);
+  if (has("earnkaro_token")) chain.push(["EarnKaro backup", convertWithEarnKaro]);
+  if (!chain.length) throw new Error("Add your ExtraPe access token in Affiliate links settings");
+  const errors: string[] = [];
+  for (const [name, fn] of chain) {
+    try { return await fn(url, settings); } catch (e) { errors.push(errors.length ? `${name}: ${e?.message || "conversion failed"}` : e?.message || `${name} conversion failed`); }
   }
-  try {
-    return await convertWithExtraPe(url, settings);
-  } catch (e) {
-    if (!(settings.earnkaro_token || "").trim()) throw e;
-    try {
-      return await convertWithEarnKaro(url, settings);
-    } catch (fallbackError) {
-      throw new Error(`${e?.message || "ExtraPe conversion failed"}; EarnKaro backup: ${fallbackError?.message || "conversion failed"}`);
-    }
-  }
+  throw new Error(errors.join("; "));
 }
 
 async function convertWithExtraPe(url: string, settings: any) {
@@ -639,16 +646,10 @@ export async function convertLink(url: string, settings: any) {
   if (mode === "sankmo_api") {
     if (!token) return convertWithDefault(url, settings);
     try {
-      const r = await fetch("https://sankmo.in/api/convertMunafaLinks", {
-        method: "POST", body: new URLSearchParams({ text: url }), headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(20000),
-      });
-      const data: any = await r.json().catch(() => ({}));
-      const found = findUrls((data && data.convertedText) || "");
-      if (r.ok && found.length && found[0] !== url) return found[0];
-      throw new Error(`Sankmo: ${data?.msg || "no converted link returned"}`);
+      return await convertWithSankmo(url, settings);
     } catch (e) {
       try {
-        return await convertWithDefault(url, settings);
+        return await convertWithDefault(url, { ...settings, sankmo_token: "" });
       } catch (fallbackError) {
         throw new Error(`${e?.message || "Sankmo conversion failed"}; fallback: ${fallbackError?.message || "conversion failed"}`);
       }

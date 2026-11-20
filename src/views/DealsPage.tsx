@@ -18,7 +18,7 @@ export default function DealsPage() {
       try { const { data } = await api.get("/deals", { params: { category: cat, q, sort } }); if (current) { setDeals(data); setError(""); } }
       catch (e) { if (current) setError(errMsg(e)); }
       finally { if (current) setLoading(false); }
-    }, 200);
+    }, q ? 200 : 0);
     return () => { current = false; clearTimeout(timer); };
   }, [cat, q, sort, tick]);
   return <main className="mx-auto max-w-7xl px-4 py-9 sm:px-8 sm:py-12">

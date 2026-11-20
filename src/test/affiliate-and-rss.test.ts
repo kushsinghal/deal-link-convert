@@ -78,6 +78,14 @@ describe("affiliate routing", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("falls back from ExtraPe to Sankmo before EarnKaro", async () => {
+    const fetchMock = vi.fn(async (input: any) => String(input).includes("extrape")
+      ? new Response(JSON.stringify({ errorCode: "INVALID_URL" }), { status: 200 })
+      : new Response(JSON.stringify({ convertedText: "https://sankmo.in/mine" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(engine.convertLink("https://www.flipkart.com/item/p/itm123", { extrape_token: "ep", sankmo_token: "sk", earnkaro_token: "ek" })).resolves.toBe("https://sankmo.in/mine");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
   it("routes Amazon through the EarnKaro backup when no ExtraPe token is saved, ignoring legacy routes", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ success: 1, data: "https://ekaro.in/amazon-link" }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
