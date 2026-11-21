@@ -162,3 +162,9 @@ export function convertViaSankmoBot(url: string): Promise<string> {
   queue = job.catch(() => undefined);
   return job;
 }
+
+export async function testBot() {
+  if (!await takeRateLimit("sankmo-test", 3, 60e3)) throw new Error("Wait a minute before testing again");
+  const link = await convertViaSankmoBot("https://www.flipkart.com/apple-iphone-15-black-128-gb/p/itm6ac6485515ae4");
+  return { ok: true, link };
+}

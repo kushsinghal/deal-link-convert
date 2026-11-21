@@ -30,11 +30,15 @@ export function validPairing(code: string, token: string) {
 
 export async function telegramCall(token: string, method: string, body: Record<string, unknown>) {
   tokenSchema.parse(token);
-  let response: Response;
-  try {
-    response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(20_000) });
-  } catch {
-    throw new Error("Telegram could not be reached. Try again.");
+  let response: Response | undefined;
+  for (let attempt = 0; !response; attempt++) {
+    try {
+      response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(12_000) });
+    } catch (e: any) {
+      console.error("Telegram network error", method, attempt, e?.cause?.code || e?.name || "unknown");
+      if (attempt >= 2) throw new Error("Telegram could not be reached. Try again.");
+      await new Promise((r) => setTimeout(r, 600));
+    }
   }
   const raw = await response.text();
   let data: any;

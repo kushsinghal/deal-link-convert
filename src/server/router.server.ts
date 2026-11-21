@@ -108,6 +108,7 @@ export async function handle(request: Request, splat: string) {
         if (method === "POST" && b === "send-code") return json(await bot.sendLoginCode(body.phone));
         if (method === "POST" && b === "verify") return json(await bot.verifyLoginCode(body.code, body.password));
         if (method === "POST" && b === "disconnect") return json(await bot.disconnectBot());
+        if (method === "POST" && b === "test") return json(await bot.testBot());
       } catch (e) { return json({ detail: String(e?.message || e).slice(0, 300) }, 400); }
     }
     if (method === "POST" && a === "x" && b === "test") {

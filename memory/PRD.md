@@ -157,3 +157,9 @@
 - Public list returns `/api/public/img/<dealId>` while the copy exists (cache 7 days, immutable), else original URL. DealCard shows the store-letter placeholder if a picture fails to load.
 - Verified: fixture deal saved (1200x900 jpg -> 480x360 webp ~4KB), served 200, card rendered on mobile; vitest 121/121, tsc clean, production build bundles sharp. NOT verified: a real source import end-to-end (testing agent not run for this feature); Render build with sharp.
 - Custom domain steps (Render -> Settings -> Custom Domains, DNS at registrar, update public URL env, reconnect bot, update cron-job.org URL) explained to user; domain not bought yet.
+
+## 2026-06 — Live Telegram issues (Render)
+- Sankmo panel on Render showed "API ID & API Hash missing" while "Connected as <user>": TELEGRAM_API_ID / TELEGRAM_API_HASH were never set on Render (render.yaml did not list them); the saved login comes from the shared DB. Added TELEGRAM_API_ID, TELEGRAM_API_HASH, X_AUTH_TOKEN, X_CT0 to render.yaml (sync:false) — user must enter values in Render → Environment.
+- Sankmo panel: new "Test Sankmo" button (POST /api/public/sankmo-bot/test, converts a sample Flipkart link, 3/min); amber warning when a login exists but API creds are missing; clearer Disconnect confirm (does not affect converter bot).
+- Intermittent "Telegram could not be reached": telegramCall now retries 3x (12s timeout each) and logs the network error code; start-production.mjs sets dns ipv4first + autoSelectFamily attempt timeout 2500ms. Root cause on Render NOT confirmed (no access to Render logs) — after redeploy check Render logs for "Telegram network error".
+- Verified in preview: tsc clean, vitest 121/121, /sankmo-bot/test returns clear error when not logged in. NOT verified: Test Sankmo with a real login, behaviour on Render.

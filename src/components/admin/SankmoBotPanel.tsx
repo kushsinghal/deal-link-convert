@@ -28,13 +28,17 @@ export const ConverterOrderPanel = ({ s, setS }) => {
 
 export const SankmoBotPanel = () => {
   const [st, setSt] = useState(null), [phone, setPhone] = useState(""), [code, setCode] = useState(""), [pw, setPw] = useState(""), [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(""), [test, setTest] = useState(null);
   const load = async () => { try { setSt((await api.get("/sankmo-bot/status")).data); } catch (e) { setError(errMsg(e)); } };
   useEffect(() => { load(); }, []);
   const call = async (path, body, msg) => {
     setBusy(true);
     setError("");
     try { const { data } = await api.post(`/sankmo-bot/${path}`, body); toast.success(data.password_required ? "Enter your Telegram two-step password" : path === "send-code" ? (data.via_app ? "Code sent to your Telegram app" : "Telegram sent a login code") : msg); setCode(""); setPw(""); if (data.connected) setPhone(""); await load(); } catch (e) { setError(errMsg(e)); await load(); } finally { setBusy(false); }
+  };
+  const runTest = async () => {
+    setBusy(true); setTest(null);
+    try { setTest({ ok: true, link: (await api.post("/sankmo-bot/test", {})).data.link }); } catch (e) { setTest({ ok: false, error: errMsg(e) }); } finally { setBusy(false); }
   };
   if (!st) return <Panel testid="sankmo-bot-panel" title="Sankmo via Telegram"><p data-testid="sankmo-bot-loading">{error || "Loading Telegram setup…"}</p><Button data-testid="sankmo-bot-retry" onClick={load}>Retry</Button></Panel>;
   return <Panel testid="sankmo-bot-panel" title="Sankmo via Telegram (@sankmo_bot)" desc="Your Telegram account sends each link to @sankmo_bot and reads the converted link it replies with. Log in to @sankmo_bot with your Sankmo account in Telegram first.">
@@ -43,8 +47,14 @@ export const SankmoBotPanel = () => {
     <a data-testid="telegram-api-tools-link" href="https://my.telegram.org/apps" target="_blank" rel="noreferrer" className="mb-4 inline-block text-xs font-semibold underline">Telegram API development tools ↗</a>
     {error && <p data-testid="sankmo-bot-error" role="alert" className="mb-3 text-xs text-rose-700">{error}</p>}
     {st.connected ? <div className="space-y-3">
-        <p data-testid="sankmo-bot-connected" className="text-sm text-emerald-800">Connected as <b>{st.user}</b>. Sankmo links convert through @sankmo_bot.</p>
-        <Button data-testid="sankmo-bot-disconnect" className={ghostBtn} disabled={busy} onClick={() => window.confirm("Log this app out of your Telegram account?") && call("disconnect", {}, "Telegram disconnected")}>Disconnect</Button>
+        {st.credentials_ready
+          ? <p data-testid="sankmo-bot-connected" className="text-sm text-emerald-800">Logged in as <b>{st.user}</b>. Press Test Sankmo to confirm links really convert.</p>
+          : <p data-testid="sankmo-bot-connected" className="text-sm text-amber-800">A saved Telegram login for <b>{st.user}</b> exists, but Sankmo cannot work on this server until the API ID & API Hash are added.</p>}
+        {test && <p data-testid="sankmo-bot-test-result" className={`break-all text-xs ${test.ok ? "text-emerald-800" : "text-rose-700"}`}>{test.ok ? `Working. Sankmo returned: ${test.link}` : `Not working: ${test.error}`}</p>}
+        <div className="flex flex-wrap gap-2">
+          <Button data-testid="sankmo-bot-test" className={primaryBtn} disabled={busy || !st.credentials_ready} onClick={runTest}>{busy ? "Please wait…" : "Test Sankmo"}</Button>
+          <Button data-testid="sankmo-bot-disconnect" className={ghostBtn} disabled={busy} onClick={() => window.confirm("Remove only the Sankmo Telegram login from this site? Your converter bot and your Telegram on your phone stay connected.") && call("disconnect", {}, "Telegram disconnected")}>Disconnect</Button>
+        </div>
       </div>
       : <div className="space-y-3">
         <label htmlFor="sankmo-phone" className="text-xs font-semibold">Telegram phone number</label>
