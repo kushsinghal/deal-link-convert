@@ -8,6 +8,14 @@ let client: any = null;
 let loginBusy = false;
 let queue: Promise<unknown> = Promise.resolve();
 let lastSent = 0;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+const IDLE_MS = 2 * 60e3;
+
+async function closeClient(c: any) { await c?.destroy?.().catch(() => {}); }
+function touchClient() {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => { const c = client; client = null; idleTimer = null; closeClient(c); }, IDLE_MS);
+}
 
 const envValue = (k: string) => (process.env[k] || "").trim().replace(/^["']|["']$/g, "").trim();
 function creds() {
@@ -33,7 +41,9 @@ async function makeClient(session = "") {
 }
 
 async function getClient() {
+  touchClient();
   if (client?.connected) return client;
+  await closeClient(client);
   const row = await (await settingsCol()).findOne({ id: "main" }, { projection: { tg_session: 1 } });
   if (!row?.tg_session) throw new Error("Sankmo bot: log in with your Telegram account first");
   client = await makeClient(unseal(row.tg_session));
@@ -81,7 +91,7 @@ export async function sendLoginCode(phone: string) {
     const r = await c.sendCode(creds(), phone);
     await savePending({ session: c.session.save(), phone, hash: r.phoneCodeHash, password_required: false });
     return { sent: true, via_app: r.isCodeViaApp };
-  } catch (e) { throw loginError(e); } finally { await c?.disconnect().catch(() => {}); loginBusy = false; }
+  } catch (e) { throw loginError(e); } finally { await closeClient(c); loginBusy = false; }
 }
 
 export async function verifyLoginCode(code: string, password?: string) {
@@ -120,11 +130,14 @@ export async function verifyLoginCode(code: string, password?: string) {
   } catch (e: any) {
     if (/PHONE_CODE_EXPIRED|AUTH_RESTART/.test(e?.errorMessage || "")) await (await pendingCol()).updateOne({ _id: "sankmo" as any }, { $unset: { state: "" }, $set: { expires_at: new Date(0) } });
     throw loginError(e);
-  } finally { await c?.disconnect().catch(() => {}); loginBusy = false; }
+  } finally { await closeClient(c); loginBusy = false; }
 }
 
 export async function disconnectBot() {
-  try { const { Api } = await import("telegram"); const c = await getClient(); await c.invoke(new Api.auth.LogOut()); await c.disconnect(); } catch { /* session may already be gone */ }
+  try { const { Api } = await import("telegram"); const c = await getClient(); await c.invoke(new Api.auth.LogOut()); } catch { /* session may already be gone */ }
+  await closeClient(client);
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = null;
   client = null;
   await (await pendingCol()).updateOne({ _id: "sankmo" as any }, { $unset: { state: "" }, $set: { expires_at: new Date(0) } });
   await (await settingsCol()).updateOne({ id: "main" }, { $unset: { tg_session: "", tg_user: "" } });

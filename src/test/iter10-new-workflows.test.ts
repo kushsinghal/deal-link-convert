@@ -11,7 +11,7 @@ vi.mock("telegram", () => {
   return { Api: { auth: { SignIn, AuthorizationSignUpRequired, LogOut } }, TelegramClient: class {
     connected = true; session: any;
     constructor(session: any) { this.session = session; }
-    setLogLevel() {} async connect() {} async disconnect() { gram.disconnects++; }
+    setLogLevel() {} async connect() {} async disconnect() { gram.disconnects++; } async destroy() { gram.disconnects++; }
     async sendCode() { if (gram.failure) throw { errorMessage: gram.failure, seconds: gram.failure === "FLOOD_WAIT" ? 90 : undefined }; return { phoneCodeHash: "TEST_hash", isCodeViaApp: true }; }
     async invoke(action: any) { if (action instanceof LogOut) return true; if (gram.failure) throw { errorMessage: gram.failure }; if (gram.password) throw { errorMessage: "SESSION_PASSWORD_NEEDED" }; return { user: { firstName: "TEST_User" } }; }
     async signInWithPassword() { if (gram.failure) throw { errorMessage: gram.failure }; return { firstName: "TEST_User" }; }
