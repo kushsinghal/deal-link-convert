@@ -804,7 +804,7 @@ export async function writeSettings(body: any) {
   }
   const clamp = (k, lo, hi) => { if (k in upd) upd[k] = Math.min(Math.max(Number(upd[k]), lo), hi); };
   clamp("check_interval_minutes", 5, 1440);
-  clamp("check_interval_seconds", 300, 86400);
+  clamp("check_interval_seconds", 60, 86400);
   clamp("website_max_age_hours", 1, 720);
   clamp("telegram_max_age_minutes", 1, 10080);
   clamp("max_posts_per_update", 1, 200);

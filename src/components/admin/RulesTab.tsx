@@ -8,6 +8,8 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Panel, fieldCls, primaryBtn } from "./Panel";
 
+const INTERVALS = [[60, "1 minute"], [180, "3 minutes"], [300, "5 minutes"], [600, "10 minutes"], [900, "15 minutes"], [1800, "30 minutes"], [3600, "1 hour"], [7200, "2 hours"]];
+
 const Row = ({ label, desc, checked, onToggle, testid, children }) => (
   <div className="flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">
     <Switch data-testid={testid} checked={!!checked} onCheckedChange={onToggle} />
@@ -34,7 +36,7 @@ export const RulesTab = () => {
     }); toast.success("Rules saved"); } catch (e) { toast.error(errMsg(e)); }
   };
   return (
-    <Panel testid="rules-panel" title="What counts as a deal" desc="Sources are checked automatically every 15 minutes. Choose whether matching posts go live immediately or wait as drafts for your review.">
+    <Panel testid="rules-panel" title="What counts as a deal" desc="Sources are checked automatically on the schedule you pick below. Choose whether matching posts go live immediately or wait as drafts for your review.">
       <div className="space-y-3">
         <Row testid="rule-auto-publish-switch" label="Publish fetched deals automatically" desc="On: new deals appear on the website right away. Off: they wait as drafts until you review and publish them" checked={s.auto_publish !== false} onToggle={set("auto_publish")} />
         <Row testid="rule-auto-post-switch" label="Auto-post to Telegram" desc="Send matching deals to your channels as soon as they're found" checked={s.auto_post} onToggle={set("auto_post")} />
@@ -53,7 +55,13 @@ export const RulesTab = () => {
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">
             <p className="font-semibold">Check for deals every</p>
-            <p data-testid="rule-interval-info" className="text-sm text-slate-700">Every 15 minutes (automatic schedule). Use "Fetch now" in Sources for an immediate check.</p>
+            <p data-testid="rule-interval-info" className="mb-2 text-xs text-slate-500">Works only as fast as your scheduler pings the site: set cron-job.org to every 1 minute, then choose the real gap here.</p>
+            <Select value={String(s.check_interval_seconds || 300)} onValueChange={(v) => setS({ ...s, check_interval_seconds: Number(v) })}>
+              <SelectTrigger data-testid="rule-interval-select" className={fieldCls}><SelectValue /></SelectTrigger>
+              <SelectContent className="border-slate-200 bg-white text-slate-900">
+                {INTERVALS.map(([v, l]) => <SelectItem key={v} value={String(v)}>{l}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
           <div className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">
             <p className="font-semibold">Max deals posted per update</p>
