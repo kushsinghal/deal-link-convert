@@ -144,3 +144,10 @@
 - Bot /tweets is now OFF by default (user asked to leave X-in-Telegram alone); switch remains in Telegram bot sub-tab.
 - Live ExtraPe sample results (preview): OK Flipkart, Myntra, Ajio, Shopsy, Tata CLiQ, JioMart, Nykaa; not supported Amazon, Meesho, Croma, Xiaomi, Snapdeal, Reliance Digital. EarnKaro/Sankmo not configured in preview, so untested.
 - vitest 121/121, tsc clean. Pending: user OK, then testing agent for combined old+new flows.
+
+## 2026-06 — Combined testing (iteration_10)
+- Testing agent iteration_10: 18/18 API tests, frontend flows pass, vitest 121/121, tsc clean. No bugs found.
+- NOT covered in preview (not configured there): EarnKaro + Sankmo live conversion, real Telegram send (no bot token/destination in preview DB), cron tick 202 path (WEBHOOK_CRON_SECRET missing in preview backend/.env), real offer-category deal from a live import (0 offers in preview DB).
+- Preview DB has overrides affiliate_chains Flipkart/Tata CLiQ = [earnkaro, sankmo] (no tokens) so Flipkart does not convert in preview until tokens are added or route reset.
+- Next: user pushes to GitHub -> Render redeploy; then on live: add EarnKaro token + Sankmo login in Keys & logins, run Check store samples, send one Telegram test post, Reconvert last 24h.
+- Backlog: derive Store Routes list from engine OFFER_STORES (P2); narrow OFFER_RE if product posts get mis-filed as offers (P2); image proxy for expiring Telegram CDN images (P1); custom domain guidance (P1).

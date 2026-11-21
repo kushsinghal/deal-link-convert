@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 10 full test (backend + frontend) of the offer-category / OFFER_STORES / Affiliate Setup sub-tabs / /tweets default-OFF / cron+vote APIs changes on the preview URL. 18/18 new pytest cases pass, 121/121 vitest and tsc --noEmit still clean. Public listing excludes offer-category and hides source fields; /api/public/deals?category=offer returns only offers (currently empty in preview). All 5 OFFER_STORES (Paytm/Swiggy/Zomato/Woohoo/Gyftr) are NOT converted by /api/public/convert (changed=false, converted=cleaned). Amazon returns a clear ExtraPe 'not supported / use Amazon tag' error. Myntra converts via ExtraPe to myntr.in. Admin /admin: wrong password rejected (401, 'Wrong password'), correct password logs in, Affiliate Setup has 3 sub-tabs with data-testid affiliate-subtab-{keys|routes|bot}, Order & stores lists 14 stores and contains none of the 5 OFFER_STORES, Telegram-bot sub-tab shows bot-tweets-enabled switch defaulting OFF (aria-checked=false). No horizontal overflow at 390px on home or Affiliate Setup. Static info pages (about/contact/disclosure/privacy/terms) and /guides all 200. Settings has 38 real sources, converter_order=[extrape, earnkaro, sankmo], extrape_managed=true, bot_tweets_enabled=false.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/public/cron/tick (correct bearer accepted path)", "issue": "WEBHOOK_CRON_SECRET / CRON_SECRET not set in preview env, so the 'accept correct bearer -> 202' path could not be exercised. 401 on missing/wrong bearer is verified."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter10_offer_and_setup.py",
+    "/app/test_reports/pytest/iter10.xml"
+  ],
+  "action_items": [
+    "Optional: set WEBHOOK_CRON_SECRET (or CRON_SECRET) in preview env so the cron tick happy-path (202) can be covered automatically; currently only the reject paths are tested.",
+    "Optional: The preview DB has an admin override affiliate_chains['Flipkart']=['earnkaro','sankmo'] (earnkaro/sankmo are NOT configured), so a bare Flipkart /convert returns 'Add your ExtraPe access token...'. Not a bug (admin override wins and user explicitly removed ExtraPe for Flipkart), but main agent may want to reset it to default so Flipkart falls through to ExtraPe (fkrt.co) out of the box. I did NOT modify it (data-rules)."
+  ],
+  "critical_code_review_comments": [
+    "engine.server.ts: categorisation returns a fixed ['offer'] array for OFFER_STORES and for no-price+offer-wording posts, which is correct. The OFFER_RE is broad (includes 'sale', 'offers?', 'low(est) prices?') — borderline normal-product posts whose crawler misses the price could be wrongly labelled 'offer'. Acceptable given the price-null guard, but worth revisiting if drafts start getting mis-filed.",
+    "router.server.ts voteDeal uses body.voter as the dedupe key with a 16-64 char regex and separate per-IP rate limit. Anonymous clients could still pad any random token and spam votes, but IP rate-limit (60/hour) caps the blast radius.",
+    "StoreRoutesPanel.STORES is a hard-coded list that intentionally excludes the 5 OFFER_STORES. If a new offer store is added to engine.server.ts OFFER_STORES, this UI list needs a manual sync — consider deriving STORES = ALL_STORES.filter(s => !OFFER_STORES.includes(s))."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter10_offer_and_setup.py"
+  ],
+  "success_rate": {"backend": "100% (18/18 pytest, 121/121 vitest, tsc clean)", "frontend": "100% on tested flows"},
+  "test_credentials": "Admin password from /app/memory/test_credentials.md (RadheKrishna@#12) worked via POST /api/public/auth/login and /admin UI.",
+  "seed_data_creation": "None. The vote test uses existing test-vote-deal-0001 and resets vote to 'none' at end so counters are unchanged. No deals, sources, destinations or settings were modified.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Preview DB has 38 user sources, 1 test-vote deal (test-vote-deal-0001), 0 offer-category deals. extrape_managed=true but preview setting admin_chains overrides Flipkart to ['earnkaro','sankmo'] which are NOT configured; use Myntra/Ajio to exercise ExtraPe. Public vote route is /api/public/deals/{id}/vote (NOT /api/public/deals/vote as the brief phrased it). WEBHOOK_CRON_SECRET env var is absent in preview; 401 on wrong/missing bearer is the only cron-tick coverage.",
+  "rca of the issue": "No bug found. All review items from the brief verified passing."
+}
