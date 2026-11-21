@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Panel, fieldCls, primaryBtn, ghostBtn } from "./Panel";
 import { TelegramConverterPanel } from "./TelegramConverterPanel";
+import { StoreRoutesPanel, CommissionPanel } from "./StoreRoutesPanel";
 import { SankmoBotPanel, ConverterOrderPanel } from "./SankmoBotPanel";
 
 const Tester = () => {
@@ -43,48 +44,6 @@ const TelegramConnect = () => (
     Converting links through your personal Telegram account (@sankmo_bot) is not available in this version. Use the Sankmo API token option instead.
   </div>
 );
-
-const ALL_STORES = ["Flipkart", "Myntra", "Ajio", "Shopsy", "Meesho", "Croma", "Tata CLiQ", "JioMart", "Nykaa", "Xiaomi", "Snapdeal",
-  "Reliance Digital", "Paytm", "Swiggy", "Zomato", "Woohoo", "Gyftr"];
-
-const ROUTE_NAMES = { extrape: "ExtraPe", earnkaro: "EarnKaro", sankmo: "Sankmo" };
-
-const StoresPanel = ({ s, setS }) => {
-  const routes = s.affiliate_routes || {};
-  const routeFor = (name) => (name === "Amazon" ? (s.amazon_route === "earnkaro" ? "earnkaro" : "extrape") : ({ amazon: "earnkaro" }[routes[name]] || routes[name] || "extrape"));
-  const put = async (body, msg) => {
-    try { const { data } = await api.put("/settings", body); setS(data); toast.success(msg); }
-    catch (e) { toast.error(errMsg(e)); }
-  };
-  const change = (name, route) => put(name === "Amazon" ? { amazon_route: route } : { affiliate_routes: { ...routes, [name]: route } },
-    `${name} now uses ${route === "original" ? "clean link" : ROUTE_NAMES[route]}`);
-  const allExtraPe = () => put({ amazon_route: "extrape", affiliate_routes: Object.fromEntries([...ALL_STORES, "Other"].map((n) => [n, "extrape"])) }, "Every store now uses ExtraPe");
-  return (
-    <Panel testid="sankmo-stores-panel" title="Affiliate route by store" desc="Choose one service per store. ExtraPe is the default; EarnKaro is used as a backup if ExtraPe fails.">
-      <Button data-testid="affiliate-all-extrape-button" className={`${ghostBtn} mb-3`} onClick={allExtraPe}>Use ExtraPe for every store</Button>
-      <div className="space-y-2">
-        {["Amazon", ...ALL_STORES, "Other"].map((n) => (
-          <div key={n} className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 py-2">
-            <span className="text-sm font-semibold">{n}</span>
-            {n === "Amazon" ?
-              <select aria-label="Amazon affiliate service" data-testid="affiliate-route-amazon" value={routeFor(n)} onChange={(e) => change(n, e.target.value)}
-                className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold">
-                <option value="extrape">ExtraPe</option>
-                <option value="earnkaro">EarnKaro</option>
-              </select> :
-              <select aria-label={`${n} affiliate service`} data-testid={`affiliate-route-${n.toLowerCase().replace(/\s+/g, "-")}`} value={routeFor(n)}
-                onChange={(e) => change(n, e.target.value)} className="h-9 rounded-lg border border-slate-300 bg-white px-3 text-xs font-semibold">
-                <option value="extrape">ExtraPe</option>
-                <option value="sankmo">Sankmo → ExtraPe fallback</option>
-                <option value="earnkaro">EarnKaro</option>
-                <option value="original">Keep clean link</option>
-              </select>}
-          </div>
-        ))}
-      </div>
-    </Panel>
-  );
-};
 
 export const SankmoTab = () => {
   const [s, setS] = useState(null);
@@ -148,7 +107,8 @@ export const SankmoTab = () => {
       <ConverterOrderPanel s={s} setS={setS} />
       <SankmoBotPanel />
       <Tester />
-      <StoresPanel s={s} setS={setS} />
+      <StoreRoutesPanel s={s} setS={setS} />
+      <CommissionPanel />
       <TelegramConverterPanel settings={s} reload={load} />
       <AlertDialog>
         <AlertDialogTrigger asChild>

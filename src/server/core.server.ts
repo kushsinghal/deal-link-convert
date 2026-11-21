@@ -1,4 +1,5 @@
 // @ts-nocheck — port of the original backend endpoints onto Lovable Cloud tables.
+import { createHash } from "node:crypto";
 import * as engine from "./engine.server";
 import { convertAffiliate } from "./affiliate.server";
 import { normalizeSource } from "./source-input.server";
@@ -33,7 +34,7 @@ const DEFAULT_SETTINGS = {
   auto_post: true, auto_publish: true, supercoin_enabled: true, gold_enabled: true, giftcard_enabled: true, giftcard_min: 5,
   product_enabled: true, product_min: 70, loot_enabled: true, keywords: [],
   convert_enabled: true, sankmo_api_url: "", sankmo_token: "", convert_mode: "sankmo_api",
-  earnkaro_token: "", extrape_token: "", amazon_route: "extrape", affiliate_routes: {}, telegram_converter_token: "", telegram_converter_username: "", telegram_converter_url: "", telegram_converter_connected: false,
+  earnkaro_token: "", extrape_token: "", amazon_route: "extrape", affiliate_routes: {}, affiliate_chains: {}, store_support: null, telegram_converter_token: "", telegram_converter_username: "", telegram_converter_url: "", telegram_converter_connected: false,
   check_interval_minutes: 5, check_interval_seconds: 300, post_style: "simple", max_posts_per_update: 20,
   website_max_age_hours: 24, telegram_max_age_minutes: 60, last_run_at: null,
   copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
@@ -295,6 +296,23 @@ function splitPost(parsed: any, text: string, links: string[], settings: any) {
   });
 }
 
+export const SOURCE_FAIL_ALERT = 3;
+/** Counts back-to-back failed scans; alerts the bot owner at the 3rd failure and when the source works again. */
+async function trackSourceHealth(src: any, error: string | null) {
+  const db = await getDb();
+  const streak = Number(src.fail_streak) || 0;
+  const t = await import("./telegram-converter.server");
+  if (!error) {
+    if (!streak) return;
+    await db.from("sources").update({ fail_streak: 0 }).eq("id", src.id);
+    if (streak >= SOURCE_FAIL_ALERT) await t.notifyOwner(`✅ Source working again: ${src.name}`).catch(() => {});
+    return;
+  }
+  const next = streak + 1;
+  await db.from("sources").update({ fail_streak: next }).eq("id", src.id);
+  if (next === SOURCE_FAIL_ALERT) await t.notifyOwner(`⚠️ Source failing: ${src.name}\nIt failed ${next} scans in a row, so no new deals are coming from it.\n\nLast error: ${error.slice(0, 300)}\n\nCheck it in Control Room → Sources, or send /status.`, `source-fail:${src.id}`).catch(() => {});
+}
+
 export async function fetchSource(src: any, runId?: string | null) {
   const db = await getDb();
   const settings = await getSettings();
@@ -305,13 +323,16 @@ export async function fetchSource(src: any, runId?: string | null) {
     const err = String(e?.message || e).slice(0, 600);
     void import("./telegram-converter.server").then((t) => t.alertIfKeyFailed(err)).catch(() => {});
     await db.from("sources").update({ last_error: err.slice(0, 300), last_fetched_at: now() }).eq("id", src.id);
+    await trackSourceHealth(src, err);
     return { fetched: 0, new_deals: 0, error: err.slice(0, 300) };
   }
   if (!Array.isArray(items)) {
     const err = "Source returned an invalid response";
     await db.from("sources").update({ last_error: err, last_fetched_at: now() }).eq("id", src.id);
+    await trackSourceHealth(src, err);
     return { fetched: 0, new_deals: 0, error: err };
   }
+  await trackSourceHealth(src, null);
   const keys = items.map((it) => `${src.id}:${it.ext_id}`);
   const seenRows = keys.length ? await check(await db.from("seen").select("key").in("key", keys)) : [];
   const seenSet = new Set(seenRows.map((r) => r.key));
@@ -378,6 +399,7 @@ export async function startFetchAll(_baseUrl?: string, options: { wait?: boolean
           errors.push({ source: src.name, error });
           console.warn("source scan failed", src.id, error);
           await db.from("sources").update({ last_error: error, last_fetched_at: now() }).eq("id", src.id);
+          await trackSourceHealth(src, error).catch(() => {});
         }
       }
     };
@@ -396,7 +418,7 @@ export async function fetchSourceById(sourceId: string, runId?: string | null) {
 }
 
 // ---------- Public reads ----------
-const DEAL_COLS = "id,title,text,note,url,clean_url,affiliate_url,converted,store,price,mrp,discount,store_price,categories,image,source,source_id,source_post_url,posted_to,posted_at,created_at,product_key,offers,featured,score,lowest_ever,history_count,lowest_seen,highest_seen,ph_min,ph_max,ph_avg,ph_url,split,split_index,split_total,published_at,converted_at,telegram_posted_at,publication_status,editorial_note,reviewed_at";
+const DEAL_COLS = "id,title,text,note,url,clean_url,affiliate_url,converted,store,price,mrp,discount,store_price,categories,image,source,source_id,source_post_url,posted_to,posted_at,created_at,product_key,offers,featured,score,lowest_ever,history_count,lowest_seen,highest_seen,ph_min,ph_max,ph_avg,ph_url,split,split_index,split_total,published_at,converted_at,telegram_posted_at,publication_status,editorial_note,reviewed_at,votes_up,votes_down,vote_score";
 
 const ilikeSafe = (q: string) => q.replace(/[%_,()*\\"]/g, " ").trim();
 
@@ -429,7 +451,7 @@ export async function listDeals(p: any) {
   // a second .or() call would replace the first; combine text search through a filter on the client side when both are needed
   let rows;
   if (sort === "price") query = query.not("price", "is", null);
-  const order = { latest: [["posted_at", false]], discount: [["discount", false]], price: [["price", true]], starred: [["featured", false], ["posted_at", false]] }[sort] || [["posted_at", false]];
+  const order = { latest: [["posted_at", false]], discount: [["discount", false]], price: [["price", true]], top: [["vote_score", false], ["posted_at", false]], starred: [["featured", false], ["posted_at", false]] }[sort] || [["posted_at", false]];
   for (const [col, asc] of order) query = query.order(col, { ascending: asc, nullsFirst: false });
   if (q && ilikeSafe(q)) {
     const search = q ? ilikeSafe(q).toLowerCase() : "";
@@ -746,7 +768,16 @@ export async function writeSettings(body: any) {
   if (upd.extrape_token === "") delete upd.extrape_token;
   if ("extrape_token" in upd) upd.extrape_token = String(upd.extrape_token).trim();
   if ("amazon_route" in upd && !["extrape", "earnkaro"].includes(upd.amazon_route)) throw new HttpError(400, "Amazon must use ExtraPe or EarnKaro");
-  for (const k of ["telegram_converter_username", "telegram_converter_url", "telegram_converter_connected"]) delete upd[k];
+  for (const k of ["telegram_converter_username", "telegram_converter_url", "telegram_converter_connected", "store_support"]) delete upd[k];
+  if ("affiliate_chains" in upd) {
+    const chains = upd.affiliate_chains;
+    if (typeof chains !== "object" || Array.isArray(chains)) throw new HttpError(400, "Store routes must be an object");
+    for (const [store, chain] of Object.entries(chains)) {
+      const ok = Array.isArray(chain) && chain.length <= 3 && new Set(chain).size === chain.length &&
+        (chain.length === 1 && chain[0] === "original" || chain.every((k) => engine.DEFAULT_CONVERTER_ORDER.includes(k)));
+      if (!ok || store.length > 40) throw new HttpError(400, `Invalid route for ${store}: pick up to 3 different converters, or Keep clean link`);
+    }
+  }
   if (upd.telegram_converter_token === "") delete upd.telegram_converter_token;
   if ("converter_order" in upd && (!Array.isArray(upd.converter_order) || [...upd.converter_order].sort().join() !== [...engine.DEFAULT_CONVERTER_ORDER].sort().join())) throw new HttpError(400, "Converter order must list ExtraPe, EarnKaro and Sankmo once each");
   if ("converter_label_style" in upd && !(["store", "link"] as string[]).includes(upd.converter_label_style)) throw new HttpError(400, "Label style must be store or link");
@@ -767,6 +798,53 @@ export async function writeSettings(body: any) {
 
 export async function convertOne(url: string) {
   return convertAffiliate(String(url || "").trim(), await getSettings());
+}
+
+let supportRunning = false;
+export async function startSupportCheck() {
+  if (supportRunning) return { running: true };
+  supportRunning = true;
+  await updateSettings({ store_support: { ...((await getSettings()).store_support || {}), running: true } });
+  void (async () => {
+    try {
+      const results = await engine.checkStoreSupport(await getSettings());
+      await updateSettings({ store_support: { running: false, checked_at: now(), results } });
+    } catch (e) {
+      await updateSettings({ store_support: { running: false, checked_at: now(), error: String(e?.message || e).slice(0, 200) } });
+    } finally { supportRunning = false; }
+  })();
+  return { running: true };
+}
+
+// ---------- Votes ----------
+const voteHash = (v: string) => createHash("sha256").update(`vote:${v}`).digest("hex").slice(0, 32);
+export async function voteDeal(id: string, body: any, ip: string) {
+  const vote = body?.vote;
+  const voter = String(body?.voter || "");
+  if (!["up", "down", "none"].includes(vote)) throw new HttpError(400, "Vote must be up, down or none");
+  if (!/^[A-Za-z0-9-]{16,64}$/.test(voter)) throw new HttpError(400, "Invalid voter");
+  const { mongo } = await import("./db.server");
+  const db = await mongo();
+  const deal = await db.collection("deals").findOne({ id, publication_status: "published" }, { projection: { _id: 0, id: 1 } });
+  if (!deal) throw new HttpError(404, "Deal not found");
+  const ipHash = voteHash(ip || "unknown");
+  const recent = await db.collection("deal_votes").countDocuments({ ip_hash: ipHash, at: { $gte: new Date(Date.now() - 3600e3) } });
+  if (recent >= 60) throw new HttpError(429, "Too many votes. Try again later.");
+  const key = `${id}:${voteHash(voter)}`;
+  const prev = (await db.collection("deal_votes").findOne({ _id: key as any }))?.vote || "none";
+  if (prev === vote) return voteCounts(db, id, vote);
+  if (vote === "none") await db.collection("deal_votes").deleteOne({ _id: key as any });
+  else await db.collection("deal_votes").updateOne({ _id: key as any }, { $set: { deal_id: id, vote, ip_hash: ipHash, at: new Date() } }, { upsert: true });
+  const inc: any = {};
+  if (prev !== "none") inc[`votes_${prev}`] = -1;
+  if (vote !== "none") inc[`votes_${vote}`] = 1;
+  inc.vote_score = (vote === "up" ? 1 : vote === "down" ? -1 : 0) - (prev === "up" ? 1 : prev === "down" ? -1 : 0);
+  await db.collection("deals").updateOne({ id }, { $inc: inc });
+  return voteCounts(db, id, vote);
+}
+async function voteCounts(db: any, id: string, mine: string) {
+  const d = await db.collection("deals").findOne({ id }, { projection: { _id: 0, votes_up: 1, votes_down: 1 } });
+  return { votes_up: Math.max(0, d?.votes_up || 0), votes_down: Math.max(0, d?.votes_down || 0), mine };
 }
 
 function applyPostPrice(info: any, context: string) {

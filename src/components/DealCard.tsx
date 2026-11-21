@@ -7,6 +7,7 @@ import { PriceHistoryDialog } from "@/components/PriceHistoryDialog";
 import { OriginalPostDialog } from "@/components/OriginalPostDialog";
 import { copyDeal, previewUrl } from "@/lib/share";
 import { OffersBox } from "@/components/OffersBox";
+import { VoteButtons } from "@/components/VoteButtons";
 
 const Thumb = ({ deal }) =>
   deal.image ? (
@@ -82,6 +83,7 @@ export const DealCard = ({ deal, index = 0, onChange }) => {
         <p data-testid={`deal-posted-${deal.id}`} className="font-mono text-[11px] text-slate-500">
           {admin ? `${deal.source} · ` : ""}posted {timeAgo(deal.posted_at || deal.created_at)}
         </p>
+        <VoteButtons deal={deal} />
         {admin && <p data-testid={`deal-disclosure-${deal.id}`} className="text-[11px] font-semibold text-slate-600">{deal.converted ? "Converted link" : "Retailer link (not converted)"}</p>}
         <div className="mt-auto flex gap-1.5 pt-1">
           <a href={link} target="_blank" rel="sponsored noopener noreferrer" data-testid={`grab-deal-button-${deal.id}`}

@@ -82,8 +82,13 @@ export async function handle(request: Request, splat: string) {
       return json({ token });
     }
 
+    if (method === "POST" && a === "deals" && b && c === "vote") {
+      const ip = (request.headers.get("x-forwarded-for") || "").split(",")[0].trim() || request.headers.get("x-real-ip") || "";
+      return json(await core.voteDeal(b, body, ip));
+    }
     // ----- admin -----
     await requireAdmin(request);
+    if (method === "POST" && a === "affiliate" && b === "support-check") return json(await core.startSupportCheck(), 202);
     if (method === "POST" && a === "telegram" && b === "converter") {
       const telegram = await import("./telegram-converter.server");
       if (c === "connect") {

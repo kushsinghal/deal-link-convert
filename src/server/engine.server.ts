@@ -574,6 +574,8 @@ export function amazonAffiliate(url: string, tag: string) {
 export const AFFILIATE_SERVICES = ["extrape", "earnkaro", "sankmo", "original"];
 
 export function affiliateRoute(store: string, settings: any) {
+  const chain = settings.affiliate_chains?.[store];
+  if (Array.isArray(chain)) return chain[0] || "original";
   if (store === "Amazon") return settings.amazon_route === "earnkaro" ? "earnkaro" : "extrape";
   const route = settings.affiliate_routes?.[store];
   return route === "amazon" ? "earnkaro" : AFFILIATE_SERVICES.includes(route) ? route : "extrape";
@@ -688,6 +690,27 @@ async function convertWithExtraPe(url: string, settings: any) {
   return candidate;
 }
 
+export const STATUS_SAMPLES: Record<string, string> = {
+  Amazon: "https://www.amazon.in/dp/B0CHX1W1XY", Flipkart: "https://www.flipkart.com/apple-iphone-15-black-128-gb/p/itm6ac6485515ae4",
+  Myntra: "https://www.myntra.com/men-tshirts", Ajio: "https://www.ajio.com/men-jeans/c/830216013", Shopsy: "https://www.shopsy.in/",
+  Meesho: "https://www.meesho.com/", Croma: "https://www.croma.com/", "Tata CLiQ": "https://www.tatacliq.com/", JioMart: "https://www.jiomart.com/",
+  Nykaa: "https://www.nykaa.com/", Xiaomi: "https://www.mi.com/in/", Snapdeal: "https://www.snapdeal.com/", "Reliance Digital": "https://www.reliancedigital.in/",
+  Paytm: "https://paytm.com/", Swiggy: "https://www.swiggy.com/", Zomato: "https://www.zomato.com/", Woohoo: "https://www.woohoo.in/", Gyftr: "https://www.gyftr.com/",
+};
+const UNSUPPORTED = /INVALID_URL|does not support|don't have these stores|0 earning|requires approval|not supported|no converted link returned/i;
+
+/** Tries every configured converter on one sample link per store; ok / unsupported / error / not set. */
+export async function checkStoreSupport(settings: any) {
+  const results: Record<string, Record<string, string>> = Object.fromEntries(Object.keys(STATUS_SAMPLES).map((s) => [s, {}]));
+  await Promise.all(Object.entries(CONVERTERS).map(async ([key, [, fn, configured]]) => {
+    for (const [store, url] of Object.entries(STATUS_SAMPLES)) {
+      if (!configured(settings)) { results[store][key] = "not set"; continue; }
+      try { await fn(url, settings); results[store][key] = "ok"; } catch (e) { results[store][key] = UNSUPPORTED.test(e?.message || "") ? "unsupported" : `error: ${String(e?.message || "failed").slice(0, 120)}`; }
+    }
+  }));
+  return results;
+}
+
 const STATUS_SAMPLE = "https://www.flipkart.com/apple-iphone-15-black-128-gb/p/itm6ac6485515ae4";
 export async function testConverterKeys(settings: any) {
   return Promise.all(Object.values(CONVERTERS).map(async ([name, fn, configured]) => {
@@ -699,6 +722,13 @@ export async function testConverterKeys(settings: any) {
 export async function convertLink(url: string, settings: any) {
   if (settings.convert_enabled === false || isDealSite(url)) return url;
   const store = detectStore(url);
+  const chain = settings.affiliate_chains?.[store];
+  if (Array.isArray(chain)) {
+    if (!chain.length || chain[0] === "original") return url;
+    const usable = chain.filter((k: string) => k in CONVERTERS && CONVERTERS[k][2](settings));
+    if (!usable.length) throw new Error(`No token is saved for the converters chosen for ${store} (${chain.map((k: string) => CONVERTERS[k]?.[0] || k).join(" → ")})`);
+    return runChain(url, settings, usable);
+  }
   const route = affiliateRoute(store, settings);
   if (route === "original") return url;
   if (store === "Amazon") return runChain(url, settings, converterChain(settings, route).filter((k) => k !== "sankmo"));
