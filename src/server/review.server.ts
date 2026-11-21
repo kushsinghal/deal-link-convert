@@ -12,6 +12,7 @@ export async function saveReview(id: string, body: any) {
   if (editorial_note.length > 5000) throw new Error("Keep your review under 5,000 characters.");
   if (publish && (editorial_note.length < 80 || body.review_confirmed !== true)) throw new Error("Add at least 80 characters of original buying advice and confirm the review checklist before publishing.");
   const db = await mongo();
+  if (publish && (await db.collection("deals").find({ id }, { projection: { _id: 0, link_unresolved: 1 } }).limit(1).toArray())[0]?.link_unresolved) throw new Error("This deal still points to another deal site. Add it again from Add Deal with the real store link.");
   const timestamp = new Date().toISOString();
   const result = await db.collection("deals").updateOne({ id }, { $set: { ...(body.title !== undefined ? { title } : {}), ...(body.editorial_note !== undefined ? { editorial_note } : {}), publication_status: publish ? "published" : "draft", reviewed_at: publish ? timestamp : null, published_at: publish ? timestamp : null } });
   if (result.matchedCount && publish) {

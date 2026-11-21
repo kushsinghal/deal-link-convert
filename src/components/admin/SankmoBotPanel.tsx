@@ -42,7 +42,7 @@ export const SankmoBotPanel = () => {
   };
   if (!st) return <Panel testid="sankmo-bot-panel" title="Sankmo via Telegram"><p data-testid="sankmo-bot-loading">{error || "Loading Telegram setup…"}</p><Button data-testid="sankmo-bot-retry" onClick={load}>Retry</Button></Panel>;
   return <Panel testid="sankmo-bot-panel" title="Sankmo via Telegram (@sankmo_bot)" desc="Your Telegram account sends each link to @sankmo_bot and reads the converted link it replies with. Log in to @sankmo_bot with your Sankmo account in Telegram first.">
-    <p data-testid="sankmo-api-credentials-status" className={`mb-3 text-xs ${st.credentials_ready ? "text-emerald-800" : "text-amber-800"}`}>{st.credentials_ready ? "API ID & API Hash configured securely" : "API ID & API Hash are missing or invalid. Phone login is unavailable until configured."}</p>
+    <p data-testid="sankmo-api-credentials-status" className={`mb-3 text-xs ${st.credentials_ready ? "text-emerald-800" : "text-amber-800"}`}>{st.credentials_ready ? "API ID & API Hash configured securely" : `${st.credentials_problem || "API ID & API Hash are missing or invalid."} Add it in Render → your service → Environment, save, and wait for the redeploy.`}</p>
     <p data-testid="sankmo-api-credentials-help" className="mb-3 text-xs text-slate-600">Server settings: <code>TELEGRAM_API_ID</code> and <code>TELEGRAM_API_HASH</code>. These are not a BotFather token or a Sankmo API token.</p>
     <a data-testid="telegram-api-tools-link" href="https://my.telegram.org/apps" target="_blank" rel="noreferrer" className="mb-4 inline-block text-xs font-semibold underline">Telegram API development tools ↗</a>
     {error && <p data-testid="sankmo-bot-error" role="alert" className="mb-3 text-xs text-rose-700">{error}</p>}

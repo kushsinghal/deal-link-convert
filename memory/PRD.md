@@ -171,3 +171,10 @@
 - Dark / normal mode: toggle in navbar (data-testid theme-toggle-button) for every visitor, saved per browser in localStorage `dealloot-theme`, default light; `.dark` on <html> set by an inline head script; colours remapped in `src/styles.css` (html.dark overrides of the fixed light utility classes) — new colour classes need a matching override there.
 - Star is admin-only: puts the deal in Best deals / Editor's picks and keeps it visible past the age limit.
 - Verified by screenshots (desktop + 390px, no overflow), API curl, tsc, vitest 121/121. Testing agent NOT run. Full live check on Render still pending (user has not deployed yet).
+
+## 2026-06 — Grouped Telegram post, unresolved links, source privacy
+- Multi-link source post: still split into separate website deals, but Telegram gets ONE message (`engine.formatGroupMessage`, `postDeal(deal, null, group)`, one post-log row, one post budget). Covered by src/test/group-message.test.ts; NOT exercised against a live channel.
+- `link_unresolved` deals (final link is still a deal site / foreign short link) are saved as draft, never auto-posted, blocked from publish in saveReview; admin Deals tab has a "Needs link" filter.
+- Public /deals no longer returns source, source_id, source_post_url, text, url, post_title.
+- Sankmo status returns `credentials_problem` (which env var is missing/malformed, never the value); env values tolerate quotes/spaces. User had NOT added TELEGRAM_API_ID/HASH on Render.
+- ScanStatus also on home page for admin. Dark mode text contrast raised.

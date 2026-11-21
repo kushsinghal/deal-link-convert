@@ -65,8 +65,8 @@ const DealRow = ({ d, reload }) => {
 
 const MAJOR = ["Flipkart", "Amazon", "Myntra", "Ajio"];
 const CONVERTER_SOURCES = ["Convert Links", "Telegram converter"];
-const TABS = ["All", ...MAJOR, "Other"];
-const inTab = (d, t) => t === "All" || (t === "Other" ? !MAJOR.includes(d.store) : d.store === t);
+const TABS = ["All", ...MAJOR, "Other", "Needs link"];
+const inTab = (d, t) => t === "Needs link" ? !!d.link_unresolved : t === "All" || (t === "Other" ? !MAJOR.includes(d.store) : d.store === t);
 
 export const DealsTab = () => {
   const [list, setList] = useState([]);
@@ -86,6 +86,7 @@ export const DealsTab = () => {
           </button>
         ))}
       </div>
+      {tab === "Needs link" && <p data-testid="needs-link-help" className="mb-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">These deals are kept as drafts and hidden from visitors and Telegram: the real store link could not be found, so the link still points to another deal site or short link. Open the link, copy the real store link, add it from Add Deal, then delete the draft here.</p>}
       <div className="space-y-2">
         {shown.map((d) => <DealRow key={d.id} d={d} reload={load} />)}
         {shown.length === 0 && <p className="text-sm text-slate-500">No deals here yet.</p>}

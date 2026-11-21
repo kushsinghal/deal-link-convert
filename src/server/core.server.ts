@@ -78,17 +78,18 @@ function destMatches(dest: any, deal: any) {
   return true;
 }
 
-async function postDeal(deal: any, destId?: string | null) {
+async function postDeal(deal: any, destId?: string | null, group?: any[]) {
   if (deal.publication_status !== "published") return [];
   const db = await getDb();
   let q = db.from("destinations").select("*").order("created_at");
   q = destId ? q.eq("id", destId) : q.eq("enabled", true);
   const dests = await check(await q.limit(100));
-  const text = engine.formatMessage(deal, (await getSettings()).post_style || "simple");
+  const many = group && group.length > 1 ? group : null;
+  const text = many ? engine.formatGroupMessage(many) : engine.formatMessage(deal, (await getSettings()).post_style || "simple");
   const results: any[] = [];
   for (const d of dests) {
     if (!destId && !destMatches(d, deal)) continue;
-    const log: any = { id: uuid(), deal_id: deal.id, deal_title: deal.title, destination_id: d.id, destination_name: d.name, url: deal.affiliate_url, created_at: now(), sent_at: null, message_id: null };
+    const log: any = { id: uuid(), deal_id: deal.id, deal_title: many ? `${deal.post_title || deal.title} (${many.length} links in one post)` : deal.title, destination_id: d.id, destination_name: d.name, url: deal.affiliate_url, created_at: now(), sent_at: null, message_id: null };
     try {
       const sent = await engine.sendTelegram(d.bot_token, d.chat_id, text, deal.image, deal);
       log.status = "success";
@@ -104,10 +105,12 @@ async function postDeal(deal: any, destId?: string | null) {
   }
   const sent = results.filter((r) => r.status === "success").map((r) => r.destination_name);
   if (sent.length) {
-    const cur = await check(await db.from("deals").select("posted_to,telegram_posted_at").eq("id", deal.id).maybeSingle());
-    const merged = [...new Set([...(cur?.posted_to || []), ...sent])];
     const firstSentAt = results.find((r) => r.status === "success")?.sent_at;
-    await db.from("deals").update({ posted_to: merged, telegram_posted_at: cur?.telegram_posted_at || firstSentAt }).eq("id", deal.id);
+    for (const one of many || [deal]) {
+      const cur = await check(await db.from("deals").select("posted_to,telegram_posted_at").eq("id", one.id).maybeSingle());
+      const merged = [...new Set([...(cur?.posted_to || []), ...sent])];
+      await db.from("deals").update({ posted_to: merged, telegram_posted_at: cur?.telegram_posted_at || firstSentAt }).eq("id", one.id);
+    }
   }
   return results;
 }
@@ -203,7 +206,7 @@ async function dealInfo(url: string) {
 
 const decodeEntities = (s: string) => s.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#0?39;|&#x27;/g, "'");
 
-async function ingest(parsed: any, source: any, settings: any, autopost: boolean, runId?: string | null) {
+async function ingest(parsed: any, source: any, settings: any, autopost: boolean, runId?: string | null, batch?: any[]) {
   const db = await getDb();
   const key = `${source.id}:${parsed.ext_id || parsed.url}`;
   delete parsed.ext_id;
@@ -250,12 +253,13 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
   deal.affiliate_url = await safeConvert(deal.clean_url, settings);
   deal.converted = deal.affiliate_url !== deal.clean_url;
   deal.featured = false;
-  deal.publication_status = source.id !== "manual" && settings.auto_publish !== false ? "published" : "draft";
+  deal.link_unresolved = source.id !== "manual" && (engine.isDealSite(deal.clean_url) || (engine.isShortLink(deal.clean_url) && engine.detectStore(deal.clean_url) === "Other"));
+  deal.publication_status = source.id !== "manual" && settings.auto_publish !== false && !deal.link_unresolved ? "published" : "draft";
   if (deal.publication_status === "published") deal.published_at = now();
   deal.score = engine.score(deal);
   const allowed = ["id", "dedupe_key", "title", "text", "note", "url", "clean_url", "affiliate_url", "converted", "store", "price", "mrp", "discount",
     "text_price", "text_mrp", "categories", "image", "source", "source_id", "source_post_url", "posted_to", "posted_at", "created_at", "title_key",
-    "product_key", "offers", "featured", "score", "lowest_ever", "history_count", "lowest_seen", "highest_seen", "split", "split_index", "split_total", "post_title", "publication_status", "published_at"];
+    "product_key", "offers", "featured", "score", "lowest_ever", "history_count", "lowest_seen", "highest_seen", "split", "split_index", "split_total", "post_title", "publication_status", "published_at", "link_unresolved"];
   const row = Object.fromEntries(allowed.filter((k) => deal[k] !== undefined).map((k) => [k, deal[k]]));
   const r = await db.from("deals").insert(row);
   if (r.error) {
@@ -268,7 +272,8 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
   try { await enrich(deal.id); } catch (e) { console.warn("enrich failed", e?.message); }
   void db.from("deals").select("image").eq("id", deal.id).maybeSingle().then((r) => saveDealImage(deal.id, r.data?.image || deal.image)).catch(() => {});
   const fresh = (rawPosted || source.id === "manual") && ageMinutes(postedAt) <= settings.telegram_max_age_minutes;
-  if (autopost && fresh && settings.auto_post) {
+  if (autopost && fresh && settings.auto_post && batch) batch.push(deal.id);
+  else if (autopost && fresh && settings.auto_post) {
     const allowedPost = runId ? await takePostBudget(runId) : true;
     if (allowedPost) {
       const fullDeal = (await check(await db.from("deals").select("*").eq("id", deal.id).maybeSingle())) || deal;
@@ -351,9 +356,14 @@ export async function fetchSource(src: any, runId?: string | null) {
       parsed.source_post_url = it.post_url;
       if (it.title) parsed.title = it.title.slice(0, 140);
       const parts = splitPost(parsed, it.text, it.links, settings);
+      const batch: string[] | undefined = parts.length > 1 ? [] : undefined;
       for (const part of parts) {
         if (parts.length === 1 && seenSet.has(`${src.id}:${part.ext_id}`)) continue;
-        if (await ingest(part, src, settings, true, runId)) added++;
+        if (await ingest(part, src, settings, true, runId, batch)) added++;
+      }
+      if (batch?.length && (runId ? await takePostBudget(runId) : true)) {
+        const group = (await check(await db.from("deals").select("*").in("id", batch))).filter((d) => d.publication_status === "published").sort((a, b) => (a.split_index || 0) - (b.split_index || 0));
+        if (group.length) await postDeal(group[0], null, group);
       }
     } catch (e) {
       const message = String(e?.message || e).slice(0, 220);

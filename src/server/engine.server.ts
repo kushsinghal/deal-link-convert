@@ -797,6 +797,17 @@ export function formatMessage(deal: any, style = "simple") {
   return lines.join("\n");
 }
 
+export function formatGroupMessage(deals: any[]) {
+  const head = deals[0].post_title || deals[0].title || "Deals";
+  const lines = [`<b>${esc(head)}</b>`];
+  deals.forEach((d, i) => {
+    const own = d.title && !d.title.startsWith(head) ? esc(d.title.slice(0, 80)) : "";
+    const label = [own, d.price ? inr(d.price) : ""].filter(Boolean).join(" · ");
+    lines.push("", `${i + 1}. ${label}`.trimEnd(), d.affiliate_url || d.url);
+  });
+  return lines.join("\n");
+}
+
 export async function sendTelegram(token: string, chatId: string, text: string, image?: string | null, deal: any = {}) {
   const lpUrl = deal.affiliate_url || deal.url;
   const payload: any = { chat_id: chatId, text, parse_mode: "HTML" };

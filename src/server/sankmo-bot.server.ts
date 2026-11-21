@@ -9,10 +9,14 @@ let loginBusy = false;
 let queue: Promise<unknown> = Promise.resolve();
 let lastSent = 0;
 
+const envValue = (k: string) => (process.env[k] || "").trim().replace(/^["']|["']$/g, "").trim();
 function creds() {
-  const apiId = Number(process.env["TELEGRAM_API_ID"]);
-  const apiHash = (process.env["TELEGRAM_API_HASH"] || "").trim();
-  if (!Number.isSafeInteger(apiId) || apiId <= 0 || !/^[a-f0-9]{32}$/i.test(apiHash)) throw new Error("Add a valid TELEGRAM_API_ID and TELEGRAM_API_HASH first");
+  const rawId = envValue("TELEGRAM_API_ID"), apiHash = envValue("TELEGRAM_API_HASH");
+  const apiId = Number(rawId);
+  if (!rawId) throw new Error("TELEGRAM_API_ID is not set on this server.");
+  if (!/^\d+$/.test(rawId) || apiId <= 0) throw new Error("TELEGRAM_API_ID is set but is not a plain number.");
+  if (!apiHash) throw new Error("TELEGRAM_API_HASH is not set on this server.");
+  if (!/^[a-f0-9]{32}$/i.test(apiHash)) throw new Error(`TELEGRAM_API_HASH is set but has ${apiHash.length} characters; it must be exactly 32 letters and digits.`);
   return { apiId, apiHash };
 }
 
@@ -38,10 +42,10 @@ async function getClient() {
 
 export async function botStatus() {
   const row = await (await settingsCol()).findOne({ id: "main" }, { projection: { tg_session: 1, tg_user: 1 } });
-  let ready = true;
-  try { creds(); } catch { ready = false; }
+  let ready = true, problem = "";
+  try { creds(); } catch (e: any) { ready = false; problem = e.message; }
   const pending = await loadPending();
-  return { connected: !!row?.tg_session, user: row?.tg_user || null, credentials_ready: ready, code_sent: !!pending, password_required: pending?.password_required || false };
+  return { connected: !!row?.tg_session, user: row?.tg_user || null, credentials_ready: ready, credentials_problem: problem, code_sent: !!pending, password_required: pending?.password_required || false };
 }
 
 async function pendingCol() { return (await mongo()).collection("telegram_login_pending"); }

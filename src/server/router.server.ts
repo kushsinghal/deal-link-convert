@@ -52,7 +52,7 @@ export async function handle(request: Request, splat: string) {
       if (a === "deals" && !b) {
         const isAdmin = await requireAdmin(request).then(() => true, () => false);
         const rows = await core.listDeals({ category: qp("category"), q: qp("q"), store: qp("store"), sort: qp("sort"), limit: qp("limit") });
-        return json(isAdmin ? rows : rows.map(({ source, source_id, source_post_url, text, ...rest }: any) => rest));
+        return json(isAdmin ? rows : rows.map(({ source, source_id, source_post_url, text, url: _url, post_title, ...rest }: any) => rest));
       }
       if (a === "deals" && b && c === "original") await requireAdmin(request);
       if (a === "deals" && b && c === "original") return json(await core.originalPost(b));
