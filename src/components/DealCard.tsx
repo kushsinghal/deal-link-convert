@@ -9,14 +9,16 @@ import { copyDeal, previewUrl } from "@/lib/share";
 import { OffersBox } from "@/components/OffersBox";
 import { VoteButtons } from "@/components/VoteButtons";
 
-const Thumb = ({ deal }) =>
-  deal.image ? (
-    <img src={deal.image} alt={deal.title} className="h-full w-full object-contain p-3" loading="lazy" />
+const Thumb = ({ deal }) => {
+  const [broken, setBroken] = useState(false);
+  return deal.image && !broken ? (
+    <img src={deal.image} alt={deal.title} className="h-full w-full object-contain p-3" loading="lazy" decoding="async" onError={() => setBroken(true)} data-testid="deal-card-image" />
   ) : (
     <div className="grid h-full w-full place-items-center bg-gradient-to-br from-slate-100 to-slate-200">
       <span className="font-display text-5xl font-black text-slate-300">{deal.store?.[0] || "D"}</span>
     </div>
   );
+};
 
 const iconBtn = "grid shrink-0 place-items-center rounded-xl border border-slate-300 px-2.5 transition-colors hover:bg-slate-200";
 

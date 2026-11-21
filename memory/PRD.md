@@ -151,3 +151,9 @@
 - Preview DB has overrides affiliate_chains Flipkart/Tata CLiQ = [earnkaro, sankmo] (no tokens) so Flipkart does not convert in preview until tokens are added or route reset.
 - Next: user pushes to GitHub -> Render redeploy; then on live: add EarnKaro token + Sankmo login in Keys & logins, run Check store samples, send one Telegram test post, Reconvert last 24h.
 - Backlog: derive Store Routes list from engine OFFER_STORES (P2); narrow OFFER_RE if product posts get mis-filed as offers (P2); image proxy for expiring Telegram CDN images (P1); custom domain guidance (P1).
+
+## 2026-06 — Deal Image Saver
+- `src/server/deal-images.server.ts`: on ingest (background) and after every scan (backfill, 25 recent deals), deal picture is downloaded, shrunk with sharp to max 480px WebP and stored in Mongo `deal_images` (TTL index 7 days — user choice). Deal gets `image_saved_at`; original `image` URL is kept (Telegram sendPhoto still uses it).
+- Public list returns `/api/public/img/<dealId>` while the copy exists (cache 7 days, immutable), else original URL. DealCard shows the store-letter placeholder if a picture fails to load.
+- Verified: fixture deal saved (1200x900 jpg -> 480x360 webp ~4KB), served 200, card rendered on mobile; vitest 121/121, tsc clean, production build bundles sharp. NOT verified: a real source import end-to-end (testing agent not run for this feature); Render build with sharp.
+- Custom domain steps (Render -> Settings -> Custom Domains, DNS at registrar, update public URL env, reconnect bot, update cron-job.org URL) explained to user; domain not bought yet.

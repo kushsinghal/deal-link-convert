@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import * as engine from "./engine.server";
 import { convertAffiliate } from "./affiliate.server";
 import { normalizeSource } from "./source-input.server";
+import { saveDealImage, saveMissingDealImages, savedImageUrl } from "./deal-images.server";
 
 export class HttpError extends Error {
   status: number;
@@ -265,6 +266,7 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
     await db.from("price_history").insert({ deal_id: deal.id, product_key: deal.product_key, price: deal.price, mrp: deal.mrp ?? null, store: deal.store, at: deal.published_at });
   }
   try { await enrich(deal.id); } catch (e) { console.warn("enrich failed", e?.message); }
+  void db.from("deals").select("image").eq("id", deal.id).maybeSingle().then((r) => saveDealImage(deal.id, r.data?.image || deal.image)).catch(() => {});
   const fresh = (rawPosted || source.id === "manual") && ageMinutes(postedAt) <= settings.telegram_max_age_minutes;
   if (autopost && fresh && settings.auto_post) {
     const allowedPost = runId ? await takePostBudget(runId) : true;
@@ -406,6 +408,7 @@ export async function startFetchAll(_baseUrl?: string, options: { wait?: boolean
       }
     };
     await Promise.all(Array.from({ length: Math.min(4, Math.max(1, sources.length)) }, worker));
+    await saveMissingDealImages().catch((e) => console.warn("image backfill failed", e?.message));
     return { fetched, new_deals: newDeals, errors };
   })().finally(() => { scanRunning = false; });
   if (!options.wait) return { queued: true, sources: sources.length };
@@ -420,9 +423,11 @@ export async function fetchSourceById(sourceId: string, runId?: string | null) {
 }
 
 // ---------- Public reads ----------
-const DEAL_COLS = "id,title,text,note,url,clean_url,affiliate_url,converted,store,price,mrp,discount,store_price,categories,image,source,source_id,source_post_url,posted_to,posted_at,created_at,product_key,offers,featured,score,lowest_ever,history_count,lowest_seen,highest_seen,ph_min,ph_max,ph_avg,ph_url,split,split_index,split_total,published_at,converted_at,telegram_posted_at,publication_status,editorial_note,reviewed_at,votes_up,votes_down,vote_score";
+const DEAL_COLS = "id,title,text,note,url,clean_url,affiliate_url,converted,store,price,mrp,discount,store_price,categories,image,source,source_id,source_post_url,posted_to,posted_at,created_at,product_key,offers,featured,score,lowest_ever,history_count,lowest_seen,highest_seen,ph_min,ph_max,ph_avg,ph_url,split,split_index,split_total,published_at,converted_at,telegram_posted_at,publication_status,editorial_note,reviewed_at,votes_up,votes_down,vote_score,image_saved_at";
 
 const ilikeSafe = (q: string) => q.replace(/[%_,()*\\"]/g, " ").trim();
+
+const withSavedImages = (rows: any[]) => rows.map(({ image_saved_at, ...d }) => ({ ...d, image: savedImageUrl({ ...d, image_saved_at }) }));
 
 export async function listDeals(p: any) {
   const db = await getDb();
@@ -443,7 +448,7 @@ export async function listDeals(p: any) {
     const since = cutoff > cutoffIso ? cutoff : cutoffIso;
     query = query.or(`featured.eq.true,and(posted_at.gte.${since},score.gte.100)`);
     query = applyStore(applyQ(query));
-    return check(await query.order("posted_at", { ascending: false }).limit(40));
+    return withSavedImages(await check(await query.order("posted_at", { ascending: false }).limit(40)));
   }
   if (category !== "starred") query = query.or(`posted_at.gte.${cutoffIso},featured.eq.true`);
   if (category === "starred") query = query.eq("featured", true);
@@ -462,7 +467,7 @@ export async function listDeals(p: any) {
     if (search) rows = rows.filter((d) => (d.title || "").toLowerCase().includes(search) || (d.store || "").toLowerCase().includes(search));
     rows = rows.slice(0, limit);
   } else rows = await check(await query.limit(limit));
-  return rows;
+  return withSavedImages(rows);
 }
 
 export async function originalPost(id: string) {

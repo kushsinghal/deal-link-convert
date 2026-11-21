@@ -60,6 +60,7 @@ export async function handle(request: Request, splat: string) {
       if (a === "stats") return json(await core.stats());
       if (a === "go" && b === "d" && c) return await core.goDeal(c);
       if (a === "go" && b && !c) return await core.goLink(b);
+      if (a === "img" && b) return await (await import("./deal-images.server")).serveDealImage(b);
       if (a === "image-proxy") return await core.imageProxy(qp("url") || "");
       if (a === "public-settings") return json(await core.publicSettingsView());
     }

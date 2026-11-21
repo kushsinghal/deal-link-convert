@@ -28,6 +28,8 @@ export async function mongo() {
         db.collection("price_history").createIndex({ product_key: 1 }),
         db.collection("ph_cache").createIndex({ url: 1 }),
         db.collection("links").createIndex({ code: 1 }),
+        db.collection("deal_images").createIndex({ id: 1 }, { unique: true }),
+        db.collection("deal_images").createIndex({ created_at: 1 }, { expireAfterSeconds: 7 * 86400 }),
         db.collection("request_limits").createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
         db.collection("telegram_tweet_jobs").createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
         db.collection("x_display_cache").createIndex({ expires_at: 1 }, { expireAfterSeconds: 0 }),
