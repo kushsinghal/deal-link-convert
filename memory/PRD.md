@@ -164,3 +164,10 @@
 - Intermittent "Telegram could not be reached": telegramCall now retries 3x (12s timeout each) and logs the network error code; start-production.mjs sets dns ipv4first + autoSelectFamily attempt timeout 2500ms. Root cause on Render NOT confirmed (no access to Render logs) — after redeploy check Render logs for "Telegram network error".
 - Verified in preview: tsc clean, vitest 121/121, /sankmo-bot/test returns clear error when not logged in. NOT verified: Test Sankmo with a real login, behaviour on Render.
 - Scan interval setting: Rules tab "Check for deals every" select (1/3/5/10/15/30 min, 1h, 2h → check_interval_seconds, min now 60). /cron/tick skips the scan (202, skipped:true) until the chosen gap since last_run_at has passed (20s slack); "Fetch now" and /cron/fetch are not gated. For gaps under 5 min the external scheduler (cron-job.org) must ping every 1 minute. Verified: setting save/clamp, dropdown on mobile, tsc, vitest 121/121, production build. NOT run in preview: the tick skip path with a valid cron secret (none configured in preview).
+
+## 2026-06 — Scan status, admin-only refresh, dark mode
+- `GET /api/public/scan-status` (admin only): last_scan_at, next_scan_at, running, latest_deal_at (latest fetched deal), fetched_4h. `ScanStatus.tsx` shown on admin Deals tab (4 cells) and compact under the interval select in Rules. Shows "Overdue" if no ping arrived 2 min past the expected time.
+- Home "Refresh" button now shown only when admin is signed in.
+- Dark / normal mode: toggle in navbar (data-testid theme-toggle-button) for every visitor, saved per browser in localStorage `dealloot-theme`, default light; `.dark` on <html> set by an inline head script; colours remapped in `src/styles.css` (html.dark overrides of the fixed light utility classes) — new colour classes need a matching override there.
+- Star is admin-only: puts the deal in Best deals / Editor's picks and keeps it visible past the age limit.
+- Verified by screenshots (desktop + 390px, no overflow), API curl, tsc, vitest 121/121. Testing agent NOT run. Full live check on Render still pending (user has not deployed yet).

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Panel, fieldCls, primaryBtn } from "./Panel";
+import { ScanStatus } from "./ScanStatus";
 
 const INTERVALS = [[60, "1 minute"], [180, "3 minutes"], [300, "5 minutes"], [600, "10 minutes"], [900, "15 minutes"], [1800, "30 minutes"], [3600, "1 hour"], [7200, "2 hours"]];
 
@@ -62,6 +63,7 @@ export const RulesTab = () => {
                 {INTERVALS.map(([v, l]) => <SelectItem key={v} value={String(v)}>{l}</SelectItem>)}
               </SelectContent>
             </Select>
+            <ScanStatus compact />
           </div>
           <div className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-4">
             <p className="font-semibold">Max deals posted per update</p>

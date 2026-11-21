@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { useEffect, useState } from "react";
 import { Search, RefreshCw, ArrowUpRight } from "lucide-react";
-import { api, errMsg } from "@/lib/api";
+import { api, errMsg, getToken } from "@/lib/api";
 import { GUIDES } from "@/lib/editorial";
 import { DealCard } from "@/components/DealCard";
 import { Input } from "@/components/ui/input";
@@ -11,6 +11,8 @@ export default function DealsPage() {
   const [deals, setDeals] = useState([]), [cat, setCat] = useState("all"), [q, setQ] = useState(""), [sort, setSort] = useState("latest");
   const [loading, setLoading] = useState(true), [error, setError] = useState(""), [tick, setTick] = useState(0);
   const reload = () => setTick(t => t + 1);
+  const [admin, setAdmin] = useState(false);
+  useEffect(() => { setAdmin(!!getToken()); }, []);
   useEffect(() => {
     let current = true;
     setLoading(true);
@@ -27,7 +29,7 @@ export default function DealsPage() {
       <a data-testid="home-guides-link" href="/guides" className="flex items-center gap-2 font-semibold underline underline-offset-4 transition-colors hover:text-orange-700">Read our buying guides <ArrowUpRight className="h-4 w-4" /></a>
     </section>
     <section className="mt-8" aria-label="Reviewed deals">
-      <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-bold">Reviewed offers</h2><button data-testid="scan-refresh-button" onClick={reload} disabled={loading} className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold transition-colors hover:bg-white disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh</button></div>
+      <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-bold">Reviewed offers</h2>{admin && <button data-testid="scan-refresh-button" onClick={reload} disabled={loading} className="flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold transition-colors hover:bg-white disabled:opacity-50"><RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />Refresh</button>}</div>
       <p data-testid="home-affiliate-disclosure" className="mt-2 text-xs leading-5 text-slate-600">Some links may earn us a commission. Prices are observations, not live quotes. <a data-testid="home-disclosure-link" href="/info/disclosure" className="underline">How our links work</a></p>
       <div className="my-5 flex flex-wrap gap-2">{FILTERS.map(([key, label]) => <button key={key} data-testid={`category-filter-${key}`} aria-pressed={cat === key} onClick={() => setCat(key)} className={`rounded-full border px-3 py-2 text-xs font-semibold transition-colors ${cat === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white hover:border-orange-600"}`}>{label}</button>)}</div>
       <div className="flex gap-2"><div className="relative min-w-0 flex-1"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-500" /><Input data-testid="deal-search-input" aria-label="Search deals" value={q} onChange={e => setQ(e.target.value)} placeholder="Search offers…" className="bg-white pl-9" /></div><select data-testid="deal-sort-select" aria-label="Sort deals" value={sort} onChange={e => setSort(e.target.value)} className="max-w-[140px] rounded-lg border border-slate-300 bg-white px-2 text-xs"><option value="latest">Latest</option><option value="top">Top voted</option><option value="starred">Editor's picks</option><option value="discount">Largest discount</option><option value="price">Lowest price</option></select></div>

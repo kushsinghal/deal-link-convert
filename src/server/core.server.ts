@@ -537,6 +537,19 @@ export async function stats() {
   return out;
 }
 
+export async function scanStatus() {
+  const db = await getDb();
+  const st = await getSettings();
+  const interval = Number(st.check_interval_seconds) || 300;
+  const latest = (await check(await db.from("deals").select("created_at").order("created_at", { ascending: false }).limit(1)))[0];
+  const fetched = (await db.from("deals").select("id", { count: "exact", head: true }).gte("created_at", ago(4 * 3600e3))).count || 0;
+  return {
+    last_scan_at: st.last_run_at || null, check_interval_seconds: interval, running: scanRunning,
+    next_scan_at: st.last_run_at ? new Date(new Date(st.last_run_at).getTime() + interval * 1000).toISOString() : null,
+    latest_deal_at: latest?.created_at || null, fetched_4h: fetched,
+  };
+}
+
 export async function publicSettingsView() {
   const s = await getSettings();
   return { copy_header: s.copy_header, copy_link_style: s.copy_link_style, product_min: s.product_min };

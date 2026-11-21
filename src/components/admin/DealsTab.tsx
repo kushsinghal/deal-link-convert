@@ -7,6 +7,7 @@ import { formatKolkata } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Panel, ghostBtn } from "./Panel";
 import { ReviewEditor } from "./ReviewEditor";
+import { ScanStatus } from "./ScanStatus";
 
 const DealRow = ({ d, reload }) => {
   const visibleCategories = [...new Set((d.categories || []).map((category) =>
@@ -75,6 +76,7 @@ export const DealsTab = () => {
   const shown = list.filter((d) => inTab(d, tab));
   return (
     <Panel testid="admin-deals-panel" title="Review queue" desc="Fetched deals are published automatically when that rule is on. Use “Save as draft” to unpublish a deal, or add your own buying advice before publishing.">
+      <ScanStatus />
       <div className="mb-4 flex flex-wrap gap-2">
         {TABS.map((t) => (
           <button key={t} data-testid={`admin-store-tab-${t.toLowerCase()}`} onClick={() => setTab(t)}

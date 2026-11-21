@@ -121,6 +121,7 @@ export async function handle(request: Request, splat: string) {
       } catch (e) { return json({ detail: String(e?.message || e).slice(0, 300) }, 400); }
     }
     if (method === "GET") {
+      if (a === "scan-status") return json(await core.scanStatus());
       if (a === "x" && b === "status") return json((await import("./x-feed.server")).xAccessStatus());
       if (a === "lookup") return json(await core.lookup(qp("url") || ""));
       if (a === "review-deals") return json(await (await import("./review.server")).reviewDeals());
