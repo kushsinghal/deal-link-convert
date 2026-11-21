@@ -659,9 +659,12 @@ async function runChain(url: string, settings: any, chain: string[]) {
 
 async function convertWithExtraPe(url: string, settings: any) {
   const token = (settings.extrape_token || "").trim();
+  // ExtraPe decodes the text once and cuts the URL at a space ("+"/"%20"); encode such queries so they survive.
+  const q = url.indexOf("?");
+  const input = q < 0 || !/\+|%20/i.test(url.slice(q)) ? url : url.slice(0, q + 1) + encodeURIComponent(url.slice(q + 1).replace(/\+/g, "%20"));
   const r = await fetch("https://www.extrape.com/handler/convertText", {
     method: "POST",
-    body: JSON.stringify({ inputText: url, bitlyConvert: false, advanceMode: false }),
+    body: JSON.stringify({ inputText: input, bitlyConvert: false, advanceMode: false }),
     headers: { "Content-Type": "application/json", accesstoken: token, Cookie: `accessToken=${token}` },
     signal: AbortSignal.timeout(20000),
   });
@@ -678,8 +681,10 @@ async function convertWithExtraPe(url: string, settings: any) {
   const payload = data?.convertedText ?? data?.outputText ?? data?.data;
   let output = typeof payload === "string" ? payload : "";
   if (/https?%3A%2F%2F/i.test(output)) { try { output = decodeURIComponent(output); } catch { throw new Error("ExtraPe returned a malformed link."); } }
-  const candidate = findUrls(output).map(link => link.replace(/[.,;!]+$/, "")).find((link) => link !== url && !link.startsWith(url + "#"));
+  const candidate = findUrls(output).map(link => link.replace(/[.,;!]+$/, "")).find((link) => link !== url && link !== input && !link.startsWith(url + "#"));
   if (!candidate) throw new Error("ExtraPe returned no converted link (check your access token)");
+  // A short link followed by leftover query text ("+", ":" or "|") means ExtraPe cut the URL.
+  if (new URL(candidate).hostname !== new URL(url).hostname && /[+:|]/.test(candidate.replace(/^https?:\/\//, ""))) throw new Error("ExtraPe returned a broken short link for this URL. No earning link was created.");
   return candidate;
 }
 

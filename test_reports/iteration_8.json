@@ -1,0 +1,42 @@
+{
+  "summary": "READ-ONLY live check of https://dealloot.onrender.com (production). No writes: no Post/Send/Fetch/Test/Convert/Connect/Import/Star buttons clicked, no settings changed. The only non-GET calls were 3 auth/login POSTs (1 wrong + 2 correct) and the automatic POST /telegram/converter/status that the Affiliate Setup tab sends when it opens (read-only server-side: getWebhookInfo). WORKING: the home page loads (109 deal cards, desktop 1920x800 and mobile 390x844, no horizontal overflow, 0 console errors, 0 failing network calls). Search ('phone' -> 2 results), category filters (8 chips; 'Best deals' -> 22) and the price-history dialog work. There are no deal detail pages: cards link straight to the store with target=_blank. All 10 guides, the guides index and the 6 info pages (about/contact/disclosure/privacy/terms/editorial) return 200 with the right H1. The footer links work. Unknown routes give a styled 404 page with a real 404 status. GET /api/public/stats returns 200 JSON (total 109, sources 40, destinations 2, posts_sent 4454, last_scan a few minutes ago, so the scheduler is running). Admin: a wrong password shows a 'Wrong password' toast and the user stays on the login screen; the correct password logs in. All 9 Control Room tabs render with no errors and no failing API calls: Convert Links, Sources, Telegram Channels, Rules, Deals, Add Deal, Affiliate Setup, Post Log, Converter History. Admin on mobile has no overflow. Customer note correction: the converter bot webhook now points to the CURRENT URL (https://dealloot.onrender.com/api/public/telegram/converter), with connected=true, pending 0 and error null. It no longer points to the old dead URL. MAIN BUG: 18 of the 109 public 'Grab' links (16%, all ajiio.co/myntr.in short links) are broken. Opening them shows the shortener page 'invalid/expired Url'.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "ExtraPe conversion (engine.server.ts convertWithExtraPe) -> deals.affiliate_url", "issue": "18/109 published deals have malformed affiliate links, e.g. 'https://ajiio.co/Brug4n+Cooper:genderfilter:Men&userClusterId=...' and 'https://myntr.in/OsUxVj+Range:60.0_100.0_60.0+TO+100.0&sort=...'. These return 200 with the body 'invalid/expired Url'. The bare short link (https://ajiio.co/Brug4n) redirects correctly (302), but to a query that is cut off at the '+' ('brand:Lee' instead of 'Lee Cooper').", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "Sources", "issue": "5/40 sources show import errors (these come from outside the app): @tapworthy and @hotdealsbywd have Telegram web preview turned off; the nitter.mie.foundation RSS gives ETIMEDOUT, and the fallbacks return 410/451; the 2 desidime.com pages return HTTP 403."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "DealCard images", "issue": "47/109 cards have no image and show a placeholder letter (A/F). 9 <img> tags from cdn4.telesco.pe fail to load (naturalWidth 0) because Telegram CDN URLs expire.", "selector": "[data-testid^=deal-card-] img", "priority": "MEDIUM"},
+      {"component": "DealCard price", "issue": "63/109 cards show 'Price on store' and no price, so the price-history dialog shows '–' for these.", "selector": "[data-testid^=deal-card-]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Grab deal link", "issue": "16% of Grab buttons lead to the 'invalid/expired Url' page (see the backend critical issue).", "affected_selectors": ["[data-testid^=grab-deal-button-]"]}
+    ],
+    "design_issues": [
+      {"screen": "404 page", "issues": ["White background and no footer, unlike the cream-coloured pages elsewhere. Cosmetic only."]},
+      {"screen": "Admin Deals tab", "issues": ["Renders all 500 review deals at once (~220k characters of DOM text). It works, but is heavy on mobile; consider paging."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix the ExtraPe link conversion. RCA: convertWithExtraPe sends the clean URL as inputText to extrape.com/handler/convertText. ExtraPe's text parser stops reading the URL at the first '+' (an encoded space in the query, e.g. 'Lee+Cooper'), shortens only the part before it, and leaves the rest as plain text right after the short link. Line 680 then decodeURIComponents the whole output, and findUrls() takes 'shortlink+rest' as one URL. Fix: before sending, replace '+' in the query with '%20'. After conversion, reject any candidate whose path has '+', ':' or '|' after the short code (or check it against the expected short-link pattern), so the chain falls back to EarnKaro or the clean URL. Then re-convert the 18 affected published deals.",
+    "Image fallback: store or proxy deal images instead of hot-linking expiring cdn4.telesco.pe URLs, or use the store's product image when the Telegram image fails (onError).",
+    "Optional: paginate the admin Deals tab and add the site footer and background to the 404 page."
+  ],
+  "critical_code_review_comments": [
+    "engine.server.ts:680-681: decodeURIComponent on the whole ExtraPe output plus findUrls() trusts any URL-like token. Leftover text glued to the short link becomes part of the 'converted' link. Validate the candidate (host is in the known shortener list and the path is a single token) before returning it.",
+    "Telegram CDN image URLs are temporary, so cards from older imports will keep losing images."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only, read-only)", "frontend": "~92% - all pages, tabs and login work; 16% of deal links are broken and ~43% of cards have no image"},
+  "test_credentials": "Admin password RadheKrishna@#12 works on production /admin (from /app/memory/test_credentials.md).",
+  "seed_data_creation": "None. Production is read-only; nothing was created, edited or deleted.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Production is https://dealloot.onrender.com and must be read-only. On mount, the Affiliate Setup tab automatically POSTs /api/public/telegram/converter/status; this is safe (getWebhookInfo only). Do NOT click star-deal, scan-refresh-button, Test/Fetch, Send or Convert. To find malformed links, GET /api/public/deals?limit=200 and look for affiliate_url matching (ajiio.co|myntr.in)/\\w+[+:&]. There were 18 on 2026-11-21.",
+  "rca of the issue": "Repro: GET /api/public/deals and find the deal titled 'AJIO Loot : Upto 80% Off On Lee Cooper Mens Clothing.'. Its clean_url is ...query=%3Arelevance%3Abrand%3ALee+Cooper%3Agenderfilter%3AMen&userClusterId=... and its affiliate_url is https://ajiio.co/Brug4n+Cooper:genderfilter:Men&userClusterId=nonpremium|men,... . curl on the affiliate_url returns 'invalid/expired Url'. https://ajiio.co/Brug4n alone 302-redirects to a query cut off at 'brand%3ALee'. So ExtraPe stopped the URL at the '+', and DealLoot glued the leftover text back onto the short link. Mitigation: replace '+' with '%20' before sending, check the output, and fall back if the check fails."
+}
