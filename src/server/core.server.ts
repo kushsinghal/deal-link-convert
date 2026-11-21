@@ -34,7 +34,8 @@ const DEFAULT_SETTINGS = {
   auto_post: true, auto_publish: true, supercoin_enabled: true, gold_enabled: true, giftcard_enabled: true, giftcard_min: 5,
   product_enabled: true, product_min: 70, loot_enabled: true, keywords: [],
   convert_enabled: true, sankmo_api_url: "", sankmo_token: "", convert_mode: "sankmo_api",
-  earnkaro_token: "", extrape_token: "", amazon_route: "extrape", affiliate_routes: {}, affiliate_chains: {}, store_support: null, telegram_converter_token: "", telegram_converter_username: "", telegram_converter_url: "", telegram_converter_connected: false,
+  earnkaro_token: "", extrape_token: "", amazon_tag: "", amazon_route: "default", affiliate_routes: {}, affiliate_chains: {}, store_support: null, telegram_converter_token: "", telegram_converter_username: "", telegram_converter_url: "", telegram_converter_connected: false,
+  bot_tweets_enabled: true, bot_tweets_public: true, bot_tweets_count: 7,
   check_interval_minutes: 5, check_interval_seconds: 300, post_style: "simple", max_posts_per_update: 20,
   website_max_age_hours: 24, telegram_max_age_minutes: 60, last_run_at: null,
   copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
@@ -160,7 +161,7 @@ async function enrich(dealId: string) {
     if (price && mrp && mrp <= price * 1.03) mrp = null;
     const discount = manual ? d.discount : engine.extractDiscount(d.text || "", price, mrp);
     const settings = await getSettings();
-    const cats = d.source_id === "manual" ? d.categories : engine.classify(d.text || "", discount, settings);
+    const cats = d.source_id === "manual" || d.categories?.includes("offer") ? d.categories : engine.classify(d.text || "", discount, settings);
     Object.assign(upd, { price, mrp, discount, categories: cats,
       store_price: ph.price && price && ph.price > price * 1.01 ? ph.price : null,
       offers: engine.markBestCard(d.offers || [], price) });
@@ -298,18 +299,19 @@ function splitPost(parsed: any, text: string, links: string[], settings: any) {
 
 export const SOURCE_FAIL_ALERT = 3;
 /** Counts back-to-back failed scans; alerts the bot owner at the 3rd failure and when the source works again. */
-async function trackSourceHealth(src: any, error: string | null) {
-  const db = await getDb();
-  const streak = Number(src.fail_streak) || 0;
+export async function trackSourceHealth(src: any, error: string | null) {
+  const { mongo } = await import("./db.server");
+  const col = (await mongo()).collection("sources");
+  const prev = await col.findOneAndUpdate({ id: src.id }, error ? { $inc: { fail_streak: 1 } } : { $set: { fail_streak: 0 } }, { returnDocument: "before", projection: { _id: 0, fail_streak: 1 } });
+  if (!prev) return;
+  const streak = Number(prev.fail_streak) || 0;
   const t = await import("./telegram-converter.server");
   if (!error) {
     if (!streak) return;
-    await db.from("sources").update({ fail_streak: 0 }).eq("id", src.id);
     if (streak >= SOURCE_FAIL_ALERT) await t.notifyOwner(`✅ Source working again: ${src.name}`).catch(() => {});
     return;
   }
   const next = streak + 1;
-  await db.from("sources").update({ fail_streak: next }).eq("id", src.id);
   if (next === SOURCE_FAIL_ALERT) await t.notifyOwner(`⚠️ Source failing: ${src.name}\nIt failed ${next} scans in a row, so no new deals are coming from it.\n\nLast error: ${error.slice(0, 300)}\n\nCheck it in Control Room → Sources, or send /status.`, `source-fail:${src.id}`).catch(() => {});
 }
 
@@ -430,6 +432,7 @@ export async function listDeals(p: any) {
   const sort = p.sort || "latest";
   const limit = Math.min(Number(p.limit) || 120, 500);
   let query = db.from("deals").select(DEAL_COLS).eq("publication_status", "published");
+  if (category !== "offer" && category !== "starred") query = query.not("categories", "in", "(offer)");
   const applyStore = (qq) => (store ? (store === "Other" ? qq.not("store", "in", `(${MAJOR_STORES.join(",")})`) : qq.eq("store", store)) : qq);
   const applyQ = (qq) => {
     const t = q ? ilikeSafe(q) : "";
@@ -593,7 +596,7 @@ export async function addDeal(body: any) {
   const text = [body.title, body.note].filter(Boolean).join(" ");
   const price = body.price ?? null, mrp = body.mrp ?? null;
   const discount = body.discount != null ? body.discount : engine.extractDiscount(text, price, mrp);
-  const cats = body.categories?.length ? body.categories : engine.classify(text, discount, settings);
+  const cats = body.categories?.length ? body.categories : engine.classify(text, discount, settings, engine.detectStore(body.url, text), price);
   const deal = { title: body.title || engine.makeTitle(body.url), text, note: body.note || null, url: body.url.trim(), store: engine.detectStore(body.url, text),
     price, mrp, discount: discount || 0, categories: cats?.length ? cats : ["heavy_discount"], image: body.image || null, ext_id: uuid() };
   const created = await ingest(deal, { id: "manual", name: "Manual" }, settings, false);
@@ -649,7 +652,7 @@ export async function addSource(body: any) {
   let value = String(body.value || "").trim();
   if (!value) throw new HttpError(400, "Enter a channel or link");
   try { value = normalizeSource(kind, value); } catch (e) { throw new HttpError(400, e.message); }
-  const dup = await check(await db.from("sources").select("id").ilike("value", value.replace(/[%_]/g, "\\$&")).limit(1));
+  const dup = await check(await db.from("sources").select("id").eq("kind", kind).ilike("value", value.replace(/[%_]/g, "\\$&")).limit(1));
   if (dup.length) throw new HttpError(400, "Source already added");
   const name = body.name || (kind === "telegram" ? `@${value}` : kind === "x" ? `@${value} (X)` : value.replace(/^https?:\/\/(www\.)?/, "").split("/")[0] + (kind === "web" ? " (website)" : ""));
   return check(await db.from("sources").insert({ id: uuid(), created_at: now(), name, kind, value, enabled: body.enabled !== false }).select("*").single());
@@ -664,11 +667,13 @@ export async function updateSource(id: string, body: any) {
     const list = (Array.isArray(body.backup_urls) ? body.backup_urls : String(body.backup_urls || "").split(/\s+/)).map((u: any) => String(u).trim()).filter(Boolean);
     if (list.length > 5) throw new HttpError(400, "Add up to 5 backup feeds");
     try { patch.backup_urls = list.map((u: string) => normalizeSource("rss", u)); } catch (e) { throw new HttpError(400, `Backup feed: ${e.message}`); }
+    patch.preferred_feed = null;
   }
   if (body.x_username !== undefined) {
     const u = String(body.x_username || "").trim().replace(/^@/, "");
     if (u && !/^[A-Za-z0-9_]{1,15}$/.test(u)) throw new HttpError(400, "Enter a valid X username");
     patch.x_username = u;
+    patch.preferred_feed = null;
   }
   const row = await check(await db.from("sources").update(patch).eq("id", id).select("*").maybeSingle());
   if (!row) throw new HttpError(404, "Source not found");
@@ -753,7 +758,7 @@ export async function sendRecent(id: string) {
 }
 
 export function adminSettingsView(s: any) {
-  const { sankmo_token, earnkaro_token, extrape_token, telegram_converter_token, amazon_tag, tg_session, tg_api_hash, ...rest } = s;
+  const { sankmo_token, earnkaro_token, extrape_token, telegram_converter_token, tg_session, tg_api_hash, ...rest } = s;
   return { ...rest, sankmo_token_masked: mask(sankmo_token || ""), earnkaro_token_masked: mask(earnkaro_token || ""), extrape_token_masked: mask(extrape_token || ""), telegram_converter_token_masked: mask(telegram_converter_token || ""), tg_connected: !!tg_session, tg_api_hash_masked: "" };
 }
 
@@ -767,14 +772,20 @@ export async function writeSettings(body: any) {
   if (upd.earnkaro_token === "") delete upd.earnkaro_token;
   if (upd.extrape_token === "") delete upd.extrape_token;
   if ("extrape_token" in upd) upd.extrape_token = String(upd.extrape_token).trim();
-  if ("amazon_route" in upd && !["extrape", "earnkaro"].includes(upd.amazon_route)) throw new HttpError(400, "Amazon must use ExtraPe or EarnKaro");
+  if ("amazon_tag" in upd) {
+    upd.amazon_tag = String(upd.amazon_tag).trim();
+    if (upd.amazon_tag && !/^[A-Za-z0-9][A-Za-z0-9-]{0,60}-21$/.test(upd.amazon_tag)) throw new HttpError(400, "Enter your issued Amazon.in tracking tag ending in -21, or leave it empty");
+  }
+  if ("amazon_route" in upd && !["default", "extrape", "earnkaro", "amazon", "original"].includes(upd.amazon_route)) throw new HttpError(400, "Choose a valid Amazon route");
+  for (const key of ["bot_tweets_enabled", "bot_tweets_public"]) if (key in upd && typeof upd[key] !== "boolean") throw new HttpError(400, `${key} must be true or false`);
+  if ("bot_tweets_count" in upd && ![5, 6, 7].includes(upd.bot_tweets_count)) throw new HttpError(400, "Choose 5, 6 or 7 tweets");
   for (const k of ["telegram_converter_username", "telegram_converter_url", "telegram_converter_connected", "store_support"]) delete upd[k];
   if ("affiliate_chains" in upd) {
     const chains = upd.affiliate_chains;
     if (typeof chains !== "object" || Array.isArray(chains)) throw new HttpError(400, "Store routes must be an object");
     for (const [store, chain] of Object.entries(chains)) {
       const ok = Array.isArray(chain) && chain.length <= 3 && new Set(chain).size === chain.length &&
-        (chain.length === 1 && chain[0] === "original" || chain.every((k) => engine.DEFAULT_CONVERTER_ORDER.includes(k)));
+        (chain.length === 1 && chain[0] === "original" || chain.every((k) => engine.DEFAULT_CONVERTER_ORDER.includes(k) || (store === "Amazon" && k === "amazon")));
       if (!ok || store.length > 40) throw new HttpError(400, `Invalid route for ${store}: pick up to 3 different converters, or Keep clean link`);
     }
   }
@@ -828,13 +839,12 @@ export async function voteDeal(id: string, body: any, ip: string) {
   const deal = await db.collection("deals").findOne({ id, publication_status: "published" }, { projection: { _id: 0, id: 1 } });
   if (!deal) throw new HttpError(404, "Deal not found");
   const ipHash = voteHash(ip || "unknown");
-  const recent = await db.collection("deal_votes").countDocuments({ ip_hash: ipHash, at: { $gte: new Date(Date.now() - 3600e3) } });
-  if (recent >= 60) throw new HttpError(429, "Too many votes. Try again later.");
+  const { takeRateLimit } = await import("./rate-limit.server");
+  if (!await takeRateLimit(`votes:${ipHash}`, 60, 3600e3)) throw new HttpError(429, "Too many votes. Try again later.");
   const key = `${id}:${voteHash(voter)}`;
-  const prev = (await db.collection("deal_votes").findOne({ _id: key as any }))?.vote || "none";
+  const result = await db.collection("deal_votes").findOneAndUpdate({ _id: key as any }, { $set: { deal_id: id, vote, ip_hash: ipHash, at: new Date() } }, { upsert: true, returnDocument: "before", projection: { _id: 0, vote: 1 } });
+  const prev = result?.vote || "none";
   if (prev === vote) return voteCounts(db, id, vote);
-  if (vote === "none") await db.collection("deal_votes").deleteOne({ _id: key as any });
-  else await db.collection("deal_votes").updateOne({ _id: key as any }, { $set: { deal_id: id, vote, ip_hash: ipHash, at: new Date() } }, { upsert: true });
   const inc: any = {};
   if (prev !== "none") inc[`votes_${prev}`] = -1;
   if (vote !== "none") inc[`votes_${vote}`] = 1;
@@ -862,7 +872,7 @@ async function saveConvertedDeal(clean: string, affiliate: string, info: any, co
   const existing = (await check(await db.from("deals").select("*").eq("clean_url", clean).order("posted_at", { ascending: false }).limit(1)))[0];
   const price = info.price ?? existing?.price ?? null, mrp = info.mrp ?? existing?.mrp ?? null;
   const discount = engine.extractDiscount(context, price, mrp) || 0;
-  const categories = engine.classify(context, discount, settings);
+  const categories = engine.classify(context, discount, settings, engine.detectStore(clean), price);
   const title = engine.cleanTitle(info.title || context) || existing?.title || engine.makeTitle(clean);
   const timestamp = now();
   const row = { title, text: context, note: context || null, url: clean, clean_url: clean,
@@ -919,7 +929,7 @@ export async function convertBulk(body: any) {
       err = String(e?.message || e).slice(0, 300);
     }
     const store = engine.detectStore(clean);
-    if (!err && out === clean) {
+    if (!err && out === clean && settings.convert_enabled !== false && engine.affiliateRoute(store, settings) !== "original") {
       err = engine.missingTokenError(engine.affiliateRoute(store, settings), settings) || "The selected affiliate service returned no earning link";
     }
     swaps.push([orig, out]);
@@ -949,7 +959,7 @@ export async function reconvert() {
   const rows = await check(await db.from("deals").select("id,clean_url,converted,store").gte("posted_at", ago(86400e3)).order("posted_at", { ascending: false }).limit(200));
   for (const d of rows) {
     const aff = await safeConvert(d.clean_url, s);
-    if (aff !== d.clean_url) await db.from("deals").update({ affiliate_url: aff, converted: true }).eq("id", d.id);
+    if (aff !== d.clean_url || s.convert_enabled === false || engine.affiliateRoute(engine.detectStore(d.clean_url), s) === "original") await db.from("deals").update({ affiliate_url: aff, converted: aff !== d.clean_url }).eq("id", d.id);
   }
   return { ok: true };
 }

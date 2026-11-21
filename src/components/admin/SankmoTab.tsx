@@ -7,10 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Panel, fieldCls, primaryBtn, ghostBtn } from "./Panel";
 import { TelegramConverterPanel } from "./TelegramConverterPanel";
 import { StoreRoutesPanel, CommissionPanel } from "./StoreRoutesPanel";
 import { SankmoBotPanel, ConverterOrderPanel } from "./SankmoBotPanel";
+import { AmazonTagPanel } from "./AmazonTagPanel";
+import { BotCommandsPanel } from "./BotCommandsPanel";
 
 const Tester = () => {
   const [url, setUrl] = useState("");
@@ -39,12 +42,6 @@ const Tester = () => {
   );
 };
 
-const TelegramConnect = () => (
-  <div data-testid="tg-unavailable" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
-    Converting links through your personal Telegram account (@sankmo_bot) is not available in this version. Use the Sankmo API token option instead.
-  </div>
-);
-
 export const SankmoTab = () => {
   const [s, setS] = useState(null);
   const [token, setToken] = useState("");
@@ -68,7 +65,11 @@ export const SankmoTab = () => {
       className={`rounded-full border px-4 py-1.5 text-xs font-semibold transition-colors ${s.convert_mode === m ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 text-slate-700 hover:text-slate-950"}`}>{label}</button>
   );
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <Tabs defaultValue="keys" data-testid="affiliate-setup-tabs">
+      <TabsList className="h-auto flex-wrap justify-start gap-1 rounded-lg border border-slate-200 bg-white p-1">
+        {[["keys", "1 · Keys & logins"], ["routes", "2 · Order & stores"], ["bot", "3 · Telegram bot"]].map(([k, l]) => <TabsTrigger key={k} value={k} data-testid={`affiliate-subtab-${k}`} className="rounded-md px-3 py-1.5 text-xs font-semibold data-[state=active]:bg-[#FF5A1F] data-[state=active]:text-white">{l}</TabsTrigger>)}
+      </TabsList>
+      <TabsContent value="keys" className="mt-5 grid items-start gap-6 lg:grid-cols-2">
     <Panel testid="sankmo-panel" title="Affiliate links" desc="Add your converter tokens. The order they are tried in is set in Converter order.">
         <div className="space-y-5">
           <div className="space-y-2 rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
@@ -87,7 +88,7 @@ export const SankmoTab = () => {
               <p data-testid="sankmo-api-help" className="rounded-xl border border-slate-200 bg-[#F5F2EA] p-3 text-xs text-slate-700">
               Sankmo converts best through your Telegram login below (@sankmo_bot). The token here is only used when Telegram is not connected.
             </p>
-          ) : s.convert_mode === "telegram" ? <TelegramConnect s={s} reload={load} /> : (
+          ) : s.convert_mode === "telegram" ? <p data-testid="sankmo-telegram-mode-hint" className="text-xs">Telegram login is in the Sankmo via Telegram panel.</p> : (
             <div><Label className="text-xs text-slate-600">Converter API URL</Label>
               <Input data-testid="sankmo-api-url-input" value={s.sankmo_api_url} onChange={(e) => setS({ ...s, sankmo_api_url: e.target.value })}
                 placeholder="https://… (use {url} and {token})" className={fieldCls} /></div>
@@ -104,27 +105,31 @@ export const SankmoTab = () => {
           <Button data-testid="sankmo-save-button" className={primaryBtn} onClick={() => save()}>Save</Button>
         </div>
       </Panel>
-      <ConverterOrderPanel s={s} setS={setS} />
-      <SankmoBotPanel />
-      <Tester />
-      <StoreRoutesPanel s={s} setS={setS} />
-      <CommissionPanel />
-      <TelegramConverterPanel settings={s} reload={load} />
+        <div className="space-y-6"><SankmoBotPanel /><AmazonTagPanel s={s} setS={setS} /></div>
+      </TabsContent>
+      <TabsContent value="routes" className="mt-5 grid items-start gap-6 lg:grid-cols-3">
+        <div className="space-y-6"><ConverterOrderPanel s={s} setS={setS} /><Tester /><CommissionPanel />
       <AlertDialog>
         <AlertDialogTrigger asChild>
-          <Button data-testid="sankmo-reconvert-button" className={`${ghostBtn} lg:col-span-2`}>Reconvert recent deals with current store settings</Button>
+          <Button data-testid="sankmo-reconvert-button" className={`${ghostBtn} w-full`}>Reconvert recent deals with current store settings</Button>
         </AlertDialogTrigger>
-        <AlertDialogContent>
+        <AlertDialogContent data-testid="reconvert-dialog">
           <AlertDialogHeader>
             <AlertDialogTitle>Reconvert recent deals?</AlertDialogTitle>
             <AlertDialogDescription>This rewrites the affiliate links of deals from the last 24 hours using your current store settings. It does not repost anything to Telegram and keeps each deal's original post time.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction data-testid="sankmo-reconvert-confirm" onClick={async () => { try { await api.post("/deals/reconvert"); toast.success("Reconverting the last 24h of deals in the background"); } catch (e) { toast.error(errMsg(e)); } }}>Reconvert</AlertDialogAction>
+            <AlertDialogCancel data-testid="reconvert-cancel">Cancel</AlertDialogCancel>
+            <AlertDialogAction data-testid="sankmo-reconvert-confirm" onClick={async () => { try { await api.post("/deals/reconvert"); toast.success("Recent deal links updated"); } catch (e) { toast.error(errMsg(e)); } }}>Reconvert</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+        </div>
+        <div className="lg:col-span-2"><StoreRoutesPanel s={s} setS={setS} /></div>
+      </TabsContent>
+      <TabsContent value="bot" className="mt-5 grid items-start gap-6 lg:grid-cols-2">
+        <TelegramConverterPanel settings={s} reload={load} /><BotCommandsPanel s={s} reload={load} />
+      </TabsContent>
+    </Tabs>
   );
 };

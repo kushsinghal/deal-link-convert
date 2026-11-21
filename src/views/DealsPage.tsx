@@ -6,7 +6,7 @@ import { GUIDES } from "@/lib/editorial";
 import { DealCard } from "@/components/DealCard";
 import { Input } from "@/components/ui/input";
 
-const FILTERS = [["all", "All deals"], ["best", "Best deals"], ["supercoin_100", "SuperCoins"], ["gift_card", "Gift cards"], ["loot_price_drop", "Price drops"], ["gold", "Gold & silver"], ["lowest", "Lowest observed"], ["starred", "Editor's picks"]];
+const FILTERS = [["all", "All deals"], ["best", "Best deals"], ["supercoin_100", "SuperCoins"], ["offer", "Offers & coupons"], ["gift_card", "Gift cards"], ["loot_price_drop", "Price drops"], ["gold", "Gold & silver"], ["lowest", "Lowest observed"], ["starred", "Editor's picks"]];
 export default function DealsPage() {
   const [deals, setDeals] = useState([]), [cat, setCat] = useState("all"), [q, setQ] = useState(""), [sort, setSort] = useState("latest");
   const [loading, setLoading] = useState(true), [error, setError] = useState(""), [tick, setTick] = useState(0);

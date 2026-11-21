@@ -3,6 +3,7 @@ import { z } from "zod";
 import { mongo } from "./db.server";
 import { getSettings, publishConversion } from "./core.server";
 import { convertAffiliateText } from "./affiliate.server";
+import { BOT_COMMANDS, BOT_HELP } from "../lib/bot-commands";
 
 const tokenSchema = z.string().regex(/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/, "Enter the bot token from BotFather");
 const entity = z.object({ type: z.string().max(40), offset: z.number().int().min(0), length: z.number().int().min(0), url: z.string().url().max(4096).optional() }).passthrough();
@@ -57,7 +58,8 @@ export async function statusReport(settings: any) {
   const { testConverterKeys } = await import("./engine.server");
   const icon: Record<string, string> = { ok: "✅", error: "❌", empty: "⚪", "not set": "➖" };
   const keys = (await testConverterKeys(settings)).map((k: any) => `${icon[k.status] || "❔"} ${k.name}: ${k.status}${k.error ? ` — ${k.error.slice(0, 120)}` : ""}`);
-  const sources = await (await mongo()).collection("sources").find({ enabled: { $ne: false } }, { projection: { _id: 0, name: 1, health: 1 } }).toArray();
+  const sources = await (await mongo()).collection("sources").find({ enabled: { $ne: false } }, { projection: { _id: 0, name: 1, health: 1, last_fetched_at: 1, last_error: 1, fail_streak: 1 } }).toArray();
+  for (const source of sources) if (source.last_fetched_at && (!source.health?.checked_at || source.last_fetched_at > source.health.checked_at)) source.health = { status: source.last_error ? "error" : "ok", message: source.last_error || "Last scan successful" };
   const ok = sources.filter((s: any) => s.health?.status === "ok").length;
   const bad = sources.filter((s: any) => s.health?.status !== "ok").map((s: any) => `${icon[s.health?.status] || "❔"} ${s.name}: ${s.health ? `${s.health.status}${s.health.message ? ` — ${String(s.health.message).slice(0, 80)}` : ""}` : "not tested yet"}`);
   return [`🔑 Keys (live check)`, ...keys, "", `📡 Feeds: ${ok}/${sources.length} working (last check)`, ...bad.slice(0, 40)].join("\n").slice(0, 4000);
@@ -126,7 +128,15 @@ export async function checkConverterHealth() {
 }
 
 export async function converterLogs(limit = 200) {
-  return (await mongo()).collection("converter_logs").find({}, { projection: { _id: 0 } }).sort({ received_at: -1 }).limit(Math.min(limit, 500)).toArray();
+  return (await mongo()).collection("converter_logs").find({}, { projection: { _id: 0 } }).sort({ received_at: -1 }).limit(Math.min(500, Math.max(1, Math.trunc(limit) || 200))).toArray();
+}
+
+export async function syncBotMenu() {
+  const settings = await getSettings();
+  const token = tokenSchema.parse(settings.telegram_converter_token);
+  await telegramCall(token, "setMyCommands", { commands: BOT_COMMANDS });
+  await telegramCall(token, "setChatMenuButton", { menu_button: { type: "commands" } });
+  return { ok: true, commands: BOT_COMMANDS };
 }
 
 export async function connectConverter(origin: string) {
@@ -138,6 +148,7 @@ export async function connectConverter(origin: string) {
   await telegramCall(token, "setWebhook", { url: `${url.origin}/api/public/telegram/converter`, secret_token: webhookSecret(token), allowed_updates: ["message", "channel_post"], drop_pending_updates: false });
   const db = await mongo();
   await db.collection("settings").updateOne({ id: "main" }, { $set: { telegram_converter_username: bot.username, telegram_converter_url: url.origin, telegram_converter_connected: true } });
+  await syncBotMenu();
   await notifyOwner("✅ Connected. The converter bot is running — send your links here.");
   return { username: bot.username, pairing_code: pairingCode(token), webhook_url: `${url.origin}/api/public/telegram/converter` };
 }
@@ -179,6 +190,14 @@ export async function receiveConverter(request: Request, body: unknown) {
   const db = await mongo();
   const chats = db.collection("telegram_converter_chats");
   const chatKey = `${bot}:${msg.chat.id}`;
+  const connected = !!await chats.findOne({ _id: chatKey as any }, { projection: { _id: 1 } });
+  if (/^\/(?:menu|help|start)(?:@\w+)?$/i.test(text.trim()) && msg.chat.type !== "channel") return Response.json({ method: "sendMessage", chat_id: msg.chat.id, text: BOT_HELP });
+  if (/^\/tweets(?:@\w+)?(?:\s|$)/i.test(text.trim()) && msg.chat.type !== "channel") {
+    const { startTweetCommand } = await import("./tweet-command.server");
+    const job = await startTweetCommand(settings, msg, update.update_id, connected, (text) => telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text, link_preview_options: { is_disabled: true } }));
+    lastBackground = job.task.catch(() => {});
+    return Response.json(job.response);
+  }
   const pair = text.match(/^\/(?:start|connect)(?:@\w+)?\s+(\S+)$/);
   if (RADHE.test(text.trim()) || (pair?.[1] && validPairing(pair[1], token))) {
     await chats.updateOne({ _id: chatKey as any }, { $set: { bot, chat_id: String(msg.chat.id), type: msg.chat.type, connected_at: new Date().toISOString() } }, { upsert: true });
@@ -190,7 +209,7 @@ export async function receiveConverter(request: Request, body: unknown) {
     return Response.json({ ok: true });
   }
   // Unknown chats cannot use the owner's paid affiliate credentials.
-  if (!await chats.findOne({ _id: chatKey })) return Response.json({ ok: true });
+  if (!connected) return Response.json({ ok: true });
   if (STATUS.test(text.trim()) && msg.chat.type !== "channel") return Response.json({ method: "sendMessage", chat_id: msg.chat.id, text: await statusReport(settings) });
   const updates = db.collection("telegram_converter_updates");
   const key = `${bot}:${update.update_id}`;
@@ -213,7 +232,7 @@ export async function receiveConverter(request: Request, body: unknown) {
     const result = await convertAffiliateText(text, settings, msg.entities || msg.caption_entities || []);
     const failed = result.items.filter((i) => i.error);
     const changed = result.items.some((i) => i.changed && !i.error);
-    const own = result.items.some((i: any) => i.own);
+    const own = result.items.some((i: any) => i.own || i.keep_clean);
     const direct = msg.chat.type !== "channel";
     // Convert what can be converted and remove every other link; normal text stays exactly as sent.
     let reply: Record<string, unknown> | null = null;

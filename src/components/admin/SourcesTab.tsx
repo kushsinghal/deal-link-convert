@@ -10,26 +10,28 @@ import { Panel, fieldCls, primaryBtn, ghostBtn } from "./Panel";
 
 const BackupEditor = ({ s, reload }) => {
   const [open, setOpen] = useState(false), [urls, setUrls] = useState((s.backup_urls || []).join("\n")), [xu, setXu] = useState(s.x_username || "");
-  if (s.kind === "x") return null;
   const save = async () => {
     try { await api.put(`/sources/${s.id}`, { backup_urls: urls, x_username: xu }); toast.success("Backups saved"); setOpen(false); await reload(); } catch (e) { toast.error(errMsg(e)); }
   };
   if (!open) return <button data-testid={`source-backups-toggle-${s.id}`} onClick={() => setOpen(true)} className="mt-1 text-xs font-semibold text-slate-600 underline">Backups{(s.backup_urls?.length || s.x_username) ? ` (${s.backup_urls?.length || 0} feeds${s.x_username ? ", X @" + s.x_username : ""})` : ""}</button>;
-  return <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+  return <div data-testid={`source-backup-editor-${s.id}`} className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
     <textarea data-testid={`source-backup-urls-${s.id}`} rows={3} value={urls} onChange={e => setUrls(e.target.value)} placeholder="Up to 5 backup RSS feed URLs, one per line" className={`${fieldCls} w-full p-2 text-xs`} />
-    <Input data-testid={`source-x-username-${s.id}`} value={xu} onChange={e => setXu(e.target.value)} placeholder="X username for the final backup (optional)" className={`${fieldCls} text-xs`} />
-    <p className="text-xs text-slate-500">Nitter feeds also try 5 other Nitter mirrors automatically. The X API is used last, at most once every 30 minutes.</p>
-    <div className="flex gap-2"><Button size="sm" data-testid={`source-backups-save-${s.id}`} className={primaryBtn} onClick={save}>Save backups</Button><Button size="sm" className={ghostBtn} onClick={() => setOpen(false)}>Cancel</Button></div>
+    {s.kind !== "x" && <Input data-testid={`source-x-username-${s.id}`} value={xu} onChange={e => setXu(e.target.value)} placeholder="X username for the final backup (optional)" className={`${fieldCls} text-xs`} />}
+    <p data-testid={`source-backup-help-${s.id}`} className="text-xs text-slate-500">The last working RSS feed is tried first on the next scan. X login/API access is a final backup only when configured.</p>
+    <div className="flex gap-2"><Button size="sm" data-testid={`source-backups-save-${s.id}`} className={primaryBtn} onClick={save}>Save backups</Button><Button size="sm" data-testid={`source-backups-cancel-${s.id}`} className={ghostBtn} onClick={() => setOpen(false)}>Cancel</Button></div>
   </div>;
 };
 
 const XTest = () => {
   const [u, setU] = useState(""), [res, setRes] = useState(null), [busy, setBusy] = useState(false);
+  const [access, setAccess] = useState(null);
+  useEffect(() => { api.get("/x/status").then(r => setAccess(r.data)).catch(() => {}); }, []);
   const run = async () => { setBusy(true); try { setRes((await api.post("/x/test", { username: u })).data); } catch (e) { setRes(null); toast.error(errMsg(e)); } finally { setBusy(false); } };
   return <div data-testid="x-test-panel" className="mt-6 rounded-lg border border-slate-200 p-4">
-    <p className="mb-2 text-sm font-semibold">Test the X API</p>
+    <p className="mb-2 text-sm font-semibold">Read recent X posts</p>
+    <p data-testid="x-access-status" className="mb-3 text-xs text-slate-500">RSS enabled · X login backup: {access ? (access.cookies_configured ? "configured" : "not configured") : "checking…"} · Official API: {access ? (access.official_configured ? "configured" : "not configured") : "checking…"}</p>
     <div className="flex gap-2"><Input data-testid="x-test-username" value={u} onChange={e => setU(e.target.value)} placeholder="@username" className={`${fieldCls} min-w-0 flex-1`} /><Button data-testid="x-test-button" disabled={busy || !u.trim()} className={ghostBtn} onClick={run}>{busy ? "…" : "Read posts"}</Button></div>
-    {res && <div data-testid="x-test-result" className="mt-3 space-y-2 text-xs"><p className="font-semibold text-emerald-800">{res.posts} posts read. Nothing imported.</p>{res.sample.map((p, i) => <p key={i} className="break-words rounded bg-slate-50 p-2">{p.text}{p.links.length ? ` · ${p.links.length} link(s)` : ""}</p>)}</div>}
+    {res && <div data-testid="x-test-result" className="mt-3 space-y-2 text-xs"><p data-testid="x-test-summary" className="break-all font-semibold text-emerald-800">{res.posts} posts · {res.stale ? "Older cached posts — live fetch unavailable" : res.cached ? "Cached" : "Fetched"} · {res.via}. Nothing imported.</p>{res.sample.map((p, i) => <p data-testid={`x-test-post-${i}`} key={i} className="break-words [overflow-wrap:anywhere] rounded bg-slate-50 p-2">{p.text}{p.links.length ? ` · ${p.links.length} link(s)` : ""}</p>)}</div>}
   </div>;
 };
 
@@ -54,7 +56,9 @@ const SourceRow = ({ s, reload }) => {
       <p data-testid={`source-name-${s.id}`} className="break-words font-semibold">{s.name} <span className="text-xs font-normal text-slate-500">{s.kind}</span></p>
       <p data-testid={`source-url-${s.id}`} className="break-all text-xs text-slate-500">{s.value}</p>
       <p data-testid={`source-status-${s.id}`} className="mt-2 break-words text-xs text-slate-600">Last import: {timeAgo(s.last_fetched_at)} · {s.total_deals || 0} deals imported</p>
-      {s.last_via && <p data-testid={`source-via-${s.id}`} className="mt-1 break-all text-xs text-amber-700">Main feed failed, last read from backup: {s.last_via}</p>}
+      {s.kind === "x" && <p data-testid={`source-generated-rss-${s.id}`} className="mt-1 break-all text-xs text-slate-500">RSS: https://nitter.net/{s.value}/rss</p>}
+      {s.last_via && <p data-testid={`source-via-${s.id}`} className="mt-1 break-all text-xs text-amber-700">Last read via: {s.last_via}</p>}
+      {s.preferred_feed && <p data-testid={`source-preferred-${s.id}`} className="mt-1 break-all text-xs text-emerald-700">Next scan starts with: {s.preferred_feed}</p>}
       <BackupEditor s={s} reload={reload} />
       {s.last_error && <p role="alert" data-testid={`source-import-error-${s.id}`} className="mt-1 break-words text-xs text-rose-700">Import error: {s.last_error}</p>}
       {s.health && <p data-testid={`source-health-${s.id}`} className={`mt-2 break-words text-xs ${s.health.status === "error" ? "text-rose-700" : "text-emerald-800"}`}>{s.health.status === "ok" ? "Readable" : s.health.status === "empty" ? "No posts" : "Check failed"} · {s.health.message} · {timeAgo(s.health.checked_at)}</p>}
@@ -85,11 +89,11 @@ export const SourcesTab = () => {
       await load();
     } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
   };
-  return <Panel testid="sources-panel" title="Deal sources" desc="Sources are fetched automatically every 15 minutes. “Test all” only checks they are readable; “Fetch now” imports new deals immediately."
+  return <Panel testid="sources-panel" title="Deal sources" desc="Telegram channels, RSS feeds, website pages and X handles. Scheduled scans require an active scheduler."
     action={<div className="flex flex-wrap gap-2"><Button data-testid="test-all-sources-button" disabled={busy || !list.length} className={ghostBtn} onClick={() => run("test")}><Activity className="mr-2 h-4 w-4" />Test all</Button><Button data-testid="fetch-all-button" disabled={busy || !list.length} className={ghostBtn} onClick={() => run("fetch")}><RefreshCw className="mr-2 h-4 w-4" />Fetch now</Button></div>}>
     <form className="mb-5 flex flex-col gap-2 sm:flex-row" onSubmit={e => { e.preventDefault(); run("add"); }}>
       <select aria-label="Source type" data-testid="add-source-kind-select" value={kind} onChange={e => setKind(e.target.value)} className={`${fieldCls} px-3 sm:w-40`}><option value="telegram">Telegram</option><option value="rss">RSS feed</option><option value="web">Website page</option><option value="x">X account</option></select>
-      <Input aria-label="Source address" data-testid="add-source-input" required value={value} onChange={e => setValue(e.target.value)} placeholder={kind === "telegram" ? "@channelname or t.me/channel" : kind === "x" ? "@username (reads via X API)" : "https://site.com/feed"} className={`${fieldCls} min-w-0 flex-1`} />
+      <Input aria-label="Source address" data-testid="add-source-input" required value={value} onChange={e => setValue(e.target.value)} placeholder={kind === "telegram" ? "@channelname or t.me/channel" : kind === "x" ? "@username or https://x.com/username" : "https://site.com/feed"} className={`${fieldCls} min-w-0 flex-1`} />
       <Button type="submit" disabled={busy || !value.trim()} data-testid="add-source-submit-button" className={primaryBtn}><Plus className="mr-1 h-4 w-4" />Add</Button>
     </form>
     {error && <p role="alert" data-testid="sources-load-error" className="mb-3 text-rose-700">{error}</p>}

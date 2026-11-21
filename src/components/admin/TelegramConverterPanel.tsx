@@ -45,7 +45,7 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
       </div>
       <div className="flex items-center gap-2 text-sm text-slate-700">
         <Bot className="h-4 w-4 shrink-0" />
-        {username ? <a className="font-semibold underline" href={`https://t.me/${username}`} target="_blank" rel="noreferrer">@{username}</a> : <span className="text-slate-500">No bot connected yet</span>}
+        {username ? <a data-testid="telegram-bot-link" className="font-semibold underline" href={`https://t.me/${username}`} target="_blank" rel="noreferrer">@{username}</a> : <span className="text-slate-500">No bot connected yet</span>}
       </div>
       <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
         <li>Create a bot with @BotFather and paste its token below.</li>
@@ -60,16 +60,16 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
       </div>
       <div className="flex flex-wrap gap-2">
         <Button data-testid="telegram-converter-connect" disabled={busy || (!token && !saved)} onClick={() => run("connect")}><Send className="mr-2 h-4 w-4" />{busy ? "Please wait…" : "Connect bot"}</Button>
-        <Button variant="outline" disabled={busy || !saved} onClick={() => run("status")}><RefreshCw className="mr-2 h-4 w-4" />Check connection</Button>
-        <Button variant="ghost" disabled={busy || !saved} onClick={() => run("disconnect")}><Unplug className="mr-2 h-4 w-4" />Disconnect</Button>
+        <Button data-testid="telegram-check-connection" variant="outline" disabled={busy || !saved} onClick={() => run("status")}><RefreshCw className="mr-2 h-4 w-4" />Check connection</Button>
+        <Button data-testid="telegram-disconnect" variant="ghost" disabled={busy || !saved} onClick={() => run("disconnect")}><Unplug className="mr-2 h-4 w-4" />Disconnect</Button>
       </div>
       <p className="text-xs text-slate-500">The connection does not expire. It is checked every 15 minutes and restored automatically if Telegram loses it; your bot sends you "Disconnected" or "restored" messages, and an alert if your ExtraPe key stops working. Disconnect stops conversion until you connect again.</p>
       {status?.pairing_code && <div className="space-y-2 text-sm">
         <Label>Or use this one-time command (expires in 15 minutes)</Label>
-        <Input readOnly aria-label="Telegram connection command" value={`/connect ${status.pairing_code}`} className="font-mono text-xs" />
+        <Input data-testid="telegram-pairing-command" readOnly aria-label="Telegram connection command" value={`/connect ${status.pairing_code}`} className="font-mono text-xs" />
       </div>}
-      {status?.chats && <p className="text-sm text-slate-600">Connected chats: {status.chats.length ? status.chats.map((c: any) => `${c.type} ${c.chat_id}`).join(", ") : "None"}</p>}
-      {status?.error && <p role="alert" className="text-sm text-destructive">{status.error}</p>}
+      {status?.chats && <p data-testid="telegram-connected-chats" className="break-words text-sm text-slate-600">Connected chats: {status.chats.length ? status.chats.map((c: any) => `${c.type} ${c.chat_id}`).join(", ") : "None"}</p>}
+      {status?.error && <p data-testid="telegram-connection-error" role="alert" className="text-sm text-destructive">{status.error}</p>}
       <div className="space-y-2 border-t border-slate-200 pt-4">
         <Label>Bot reply style</Label>
         <div className="inline-flex rounded-full border border-slate-300 p-0.5 text-xs font-semibold" role="group" aria-label="Bot reply style">
@@ -80,7 +80,7 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
         </div>
         <Label>Preview</Label>
         <p data-testid="telegram-converter-preview" className="rounded-xl bg-[#F5F2EA] p-3 text-sm text-slate-800">
-          Deal price ₹399 at <a href="https://www.flipkart.com/" className="font-semibold text-sky-700 underline" onClick={(e) => e.preventDefault()}>{labelStyle === "link" ? "https://fkrt.cc/your-link" : "@Flipkart"}</a>
+          Deal price ₹399 at <a data-testid="telegram-preview-link" href="https://www.flipkart.com/" className="font-semibold text-sky-700 underline" onClick={(e) => e.preventDefault()}>{labelStyle === "link" ? "https://fkrt.cc/your-link" : "@Flipkart"}</a>
         </p>
         <p className="text-xs text-slate-500">{labelStyle === "link" ? "The converted link is shown as the clickable text." : "Store names become clickable links to your affiliate page."} Your links are never shown as raw text.</p>
       </div>

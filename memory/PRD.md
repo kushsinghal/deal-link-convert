@@ -136,3 +136,11 @@
 - FIXED (preview, needs GitHub push + Render redeploy): ExtraPe cut URLs at '+'/space → broken myntr.in/ajiio.co links (18/109 live). Query now encoded when it has +/%20; broken short links rejected. iteration_9 5/5 pass. After deploy: Control Room → Reconvert (last 24h).
 - Backlog: expiring Telegram CDN images (47/109 cards no image) → proxy/store images; paginate admin Deals tab; 404 page styling.
 - Cron: cron-job.org POST /api/public/cron/tick, header Authorization: Bearer CRON_SECRET, every 5 min.
+
+## 2026-06 — Offers tab, affiliate page layout (user review pending, testing agent NOT yet run)
+- New category `offer` ("Offers & coupons" filter on home). Paytm/Swiggy/Zomato/Woohoo/Gyftr (engine OFFER_STORES) are never converted and always classified `offer`; any post with no product price + offer wording (coupon/code/bank offer/cashback/upto %/sale) is also `offer`. Offer posts are excluded from all other public listings.
+- Those 5 stores removed from Store Routes and sample checks.
+- Affiliate Setup split into 3 sub-tabs: Keys & logins / Order & stores / Telegram bot (data-testid affiliate-subtab-*).
+- Bot /tweets is now OFF by default (user asked to leave X-in-Telegram alone); switch remains in Telegram bot sub-tab.
+- Live ExtraPe sample results (preview): OK Flipkart, Myntra, Ajio, Shopsy, Tata CLiQ, JioMart, Nykaa; not supported Amazon, Meesho, Croma, Xiaomi, Snapdeal, Reliance Digital. EarnKaro/Sankmo not configured in preview, so untested.
+- vitest 121/121, tsc clean. Pending: user OK, then testing agent for combined old+new flows.

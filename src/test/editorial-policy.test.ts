@@ -14,6 +14,7 @@ vi.mock("@/server/db.server", () => {
   const collection = (name: string) => ({
     find: (filter: any) => { const cursor: any = { sort: () => cursor, limit: () => cursor, toArray: async () => (state.tables[name] || []).filter(r => matches(r, filter)).map(row => ({ ...row })) }; return cursor; },
     updateOne: async (filter: any, patch: any) => { const row = (state.tables[name] || []).find(r => matches(r, filter)); if (row) Object.assign(row, patch.$set); return { matchedCount: row ? 1 : 0 }; },
+    findOneAndUpdate: async (filter: any, patch: any) => { const row = (state.tables[name] || []).find(r => matches(r, filter)); if (!row) return null; const previous = { ...row }; Object.assign(row, patch.$set); for (const [key, value] of Object.entries(patch.$inc || {})) row[key] = (row[key] || 0) + Number(value); return previous; },
   });
   return { mongo: async () => ({ collection }), db: { from: (name: string) => {
     let op = "select", patch: any, single = false;

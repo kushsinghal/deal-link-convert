@@ -1,13 +1,15 @@
 // T1 tests: /Radhe webhook reply, checkConverterHealth webhook ownership, alertIfKeyFailed key-expiry alerts.
 // Uses a real local Mongo but an ISOLATED test database (never the app's dealloot_preview) and a fake bot token.
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const envFile = Object.fromEntries(readFileSync("/app/backend/.env", "utf8").split("\n").filter((l) => l.includes("=")).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).replace(/^"|"$/g, "")]));
-process.env.MONGO_URL = process.env.MONGO_URL || envFile.MONGO_URL;
-process.env.DB_NAME = "dealloot_t1_isolated_test";
-process.env.SESSION_SECRET = "t1-test-session-secret-not-real";
-delete process.env.EXTRAPE_SESSION_SECRET; // keep settings.extrape_token under test control
+process.env["MONGO_URL"] = process.env["MONGO_URL"] || envFile["MONGO_URL"];
+const TEST_DB = `dealloot_t1_${randomUUID().replaceAll("-", "")}`;
+process.env["DB_NAME"] = TEST_DB;
+process.env["SESSION_SECRET"] = "t1-test-session-secret-not-real";
+delete process.env["EXTRAPE_SESSION_SECRET"]; // keep settings.extrape_token under test control
 
 const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd";
 const SITE = "https://site.test";
@@ -25,7 +27,7 @@ beforeAll(async () => {
   ({ mongo } = await import("@/server/db.server"));
   conv = await import("@/server/telegram-converter.server");
   const db = await mongo();
-  expect(db.databaseName).toBe("dealloot_t1_isolated_test");
+  expect(db.databaseName).toBe(TEST_DB);
   await db.collection("settings").updateOne({ id: "main" }, { $set: { id: "main", telegram_converter_token: TOKEN, telegram_converter_connected: true, telegram_converter_url: SITE } }, { upsert: true });
   await db.collection("telegram_converter_chats").updateOne({ _id: `123456:${CHAT_ID}` }, { $set: { bot: "123456", chat_id: CHAT_ID, type: "private" } }, { upsert: true });
 });
@@ -34,7 +36,8 @@ afterAll(async () => {
   await db.collection("settings").deleteOne({ id: "main" });
   await db.collection("telegram_converter_chats").deleteMany({ bot: "123456" });
   await db.collection("converter_alerts").deleteMany({ _id: { $in: ["extrape-key", "earnkaro-key", "sankmo-key", "x-cookie", "converter-restored", "converter-lost"] } });
-  await db.dropDatabase(); // isolated DB created only by this test
+  // Never drop a database; remove only this suite's known chat fixtures.
+  await db.collection("telegram_converter_chats").deleteMany({ _id: { $in: ["123456:4242", "123456:5253"] } });
 });
 beforeEach(async () => {
   calls.length = 0;
@@ -65,8 +68,8 @@ describe("/Radhe webhook", () => {
       const res = await conv.receiveConverter(req, { update_id: 77, message: { message_id: 5, chat: { id: 4242, type: "private" }, text } });
       expect(res.status).toBe(200);
       expect(sends()).toHaveLength(1);
-      expect(sends()[0].body.chat_id).toBe(4242);
-      expect(sends()[0].body.text).toContain("Connected");
+      expect(sends()[0]!.body.chat_id).toBe(4242);
+      expect(sends()[0]!.body.text).toContain("Connected");
       await (await mongo()).collection("telegram_converter_chats").deleteOne({ _id: "123456:4242" });
     });
   }
@@ -79,9 +82,8 @@ describe("/Radhe webhook", () => {
     const req = new Request(EXPECTED, { headers: { "x-telegram-bot-api-secret-token": conv.webhookSecret(TOKEN) } });
     const res = await conv.receiveConverter(req, { update_id: 78, message: { message_id: 5, chat: { id: 4343, type: "private" }, text: "/start" } });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
-    expect(sends()).toHaveLength(1);
-    expect(JSON.stringify(sends()[0])).toContain("/Radhe");
+    expect(await res.json()).toMatchObject({ method: "sendMessage", chat_id: 4343, text: expect.stringContaining("/tweets") });
+    expect(sends()).toHaveLength(0);
   });
 });
 
@@ -121,8 +123,8 @@ describe("alertIfKeyFailed", () => {
     it(`alerts once for ${err.slice(0, 40)}`, async () => {
       await conv.alertIfKeyFailed(err);
       expect(sends()).toHaveLength(1);
-      expect(sends()[0].body.chat_id).toBe(CHAT_ID);
-      expect(sends()[0].body.text).toContain(err.slice(0, 30));
+      expect(sends()[0]!.body.chat_id).toBe(CHAT_ID);
+      expect(sends()[0]!.body.text).toContain(err.slice(0, 30));
       expect(await (await mongo()).collection("converter_alerts").findOne({ _id: key })).toBeTruthy();
       await conv.alertIfKeyFailed(err); // within 6h -> suppressed
       expect(sends()).toHaveLength(1);
@@ -160,7 +162,7 @@ describe("runChain per-converter alert", () => {
     await waitFor(() => sends().length > 0);
     await new Promise((r) => setTimeout(r, 200));
     expect(sends()).toHaveLength(1);
-    expect(sends()[0].body.text).toContain("ExtraPe key problem");
+    expect(sends()[0]!.body.text).toContain("ExtraPe key problem");
     expect(await (await mongo()).collection("converter_alerts").findOne({ _id: "extrape-key" })).toBeTruthy();
   });
   it("ExtraPe succeeds -> no alert, EarnKaro not called", async () => {
@@ -193,23 +195,25 @@ describe("/start and Radhe Radhe", () => {
   it("plain /start does NOT connect the chat", async () => {
     const res = await hook(90, 5151, "/start");
     expect(res.status).toBe(200);
-    expect(sends()).toHaveLength(1);
-    expect(sends()[0].body.chat_id).toBe(5151);
-    expect(sends()[0].body.text).toContain("/Radhe");
-    expect(sends()[0].body.text).not.toContain("Connected");
+    const reply = await res.json();
+    expect(sends()).toHaveLength(0);
+    expect(reply.chat_id).toBe(5151);
+    expect(reply.text).toContain("/Radhe");
+    expect(reply.text).toContain("/menu");
+    expect(reply.text).not.toContain("Connected");
     expect(await (await mongo()).collection("telegram_converter_chats").findOne({ _id: "123456:5151" })).toBeNull();
   });
   it("/start@bot also gets the hint", async () => {
-    await hook(91, 5152, "/start@xtelgobot");
-    expect(sends()).toHaveLength(1);
-    expect(sends()[0].body.text).toContain("/Radhe");
+    const res = await hook(91, 5152, "/start@xtelgobot");
+    expect(sends()).toHaveLength(0);
+    expect((await res.json()).text).toContain("/Radhe");
   });
   for (const text of ["Radhe Radhe", "radhe   RADHE"]) {
     it(`${JSON.stringify(text)} connects like /Radhe`, async () => {
       const res = await hook(92, 5253, text);
       expect(res.status).toBe(200);
       expect(sends()).toHaveLength(1);
-      expect(sends()[0].body.text).toContain("Connected");
+      expect(sends()[0]!.body.text).toContain("Connected");
       const db = await mongo();
       expect(await db.collection("telegram_converter_chats").findOne({ _id: "123456:5253" })).toBeTruthy();
       await db.collection("telegram_converter_chats").deleteOne({ _id: "123456:5253" });

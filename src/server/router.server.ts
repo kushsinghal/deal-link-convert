@@ -98,6 +98,7 @@ export async function handle(request: Request, splat: string) {
       }
       if (c === "status") return json(await telegram.converterStatus());
       if (c === "disconnect") return json(await telegram.disconnectConverter());
+      if (c === "menu") return json(await telegram.syncBotMenu());
     }
     if (a === "sankmo-bot") {
       const bot = await import("./sankmo-bot.server");
@@ -110,11 +111,12 @@ export async function handle(request: Request, splat: string) {
     }
     if (method === "POST" && a === "x" && b === "test") {
       try {
-        const items = await (await import("./x-feed.server")).fetchX(String(body.username || ""), true);
-        return json({ posts: items.length, sample: items.slice(0, 3).map((i: any) => ({ text: i.text.slice(0, 200), links: i.links, image: i.image, posted_at: i.posted_at })) });
+        const result = await (await import("./x-feed.server")).recentTweets(String(body.username || ""), 7);
+        return json({ ...result, posts: result.items.length, sample: result.items.map((i: any) => ({ text: i.text.slice(0, 800), links: i.links, image: i.image, posted_at: i.posted_at, post_url: i.post_url })) });
       } catch (e) { return json({ detail: String(e?.message || e).slice(0, 300) }, 400); }
     }
     if (method === "GET") {
+      if (a === "x" && b === "status") return json((await import("./x-feed.server")).xAccessStatus());
       if (a === "lookup") return json(await core.lookup(qp("url") || ""));
       if (a === "review-deals") return json(await (await import("./review.server")).reviewDeals());
       if (a === "sources") return json(await core.listSources());

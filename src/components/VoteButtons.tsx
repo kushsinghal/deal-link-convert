@@ -14,7 +14,7 @@ const myVotes = () => { try { return JSON.parse(localStorage.getItem("dl_votes")
 export const VoteButtons = ({ deal }) => {
   const [counts, setCounts] = useState({ up: deal.votes_up || 0, down: deal.votes_down || 0 });
   const [mine, setMine] = useState("none");
-  useEffect(() => { setMine(myVotes()[deal.id] || "none"); }, [deal.id]);
+  useEffect(() => { setMine(myVotes()[deal.id] || "none"); setCounts({ up: deal.votes_up || 0, down: deal.votes_down || 0 }); }, [deal.id, deal.votes_up, deal.votes_down]);
   const [busy, setBusy] = useState(false);
   const cast = async (v) => {
     const vote = mine === v ? "none" : v;

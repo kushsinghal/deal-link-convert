@@ -2,6 +2,7 @@
 import { parse as parseHtml } from "node-html-parser";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { normalizeTelegram } from "./source-input.server";
+import { routeForStore } from "../lib/affiliate-routing";
 
 export const UA = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36" };
 const URL_SRC = String.raw`https?:\/\/[^\s<>"')\]]+`;
@@ -36,7 +37,9 @@ export const STORES: Record<string, string[]> = {
   Gyftr: ["gyftr.com"],
 };
 export const SANKMO_DEFAULT = ["Flipkart", "Myntra", "Ajio", "Shopsy", "Meesho", "Croma", "Tata CLiQ", "JioMart", "Nykaa", "Xiaomi", "Snapdeal", "Reliance Digital"];
-export const CATEGORIES = ["supercoin_100", "gift_card", "heavy_discount", "loot", "gold"];
+export const CATEGORIES = ["supercoin_100", "gift_card", "heavy_discount", "loot", "gold", "offer"];
+export const OFFER_STORES = ["Paytm", "Swiggy", "Zomato", "Woohoo", "Gyftr"];
+const OFFER_RE = /coupon|promo\s*code|\bcode\b|bank\s*offer|card\s*offer|cashback|\b(?:up\s*to|upto|min(?:imum)?\.?|flat|extra)\s*(?:₹|rs\.?\s*)?\d+\s*%?|\bsale\b|starting\s*(?:at|from)|\boffers?\b|low(?:est)?\s*prices?|price\s*(?:slash|drop)/i;
 
 const GOLD_RE = new RegExp(
   String.raw`\b(?:gold|silver)\b.{0,60}?\b(?:coins?|bars?|bullion|pendants?|jewell?ery|chains?|rings?|earrings?|bangles?|bracelets?|gms?|grams?|g\b|24\s*k\w*|22\s*k\w*|999|916|hallmark\w*|bis)\b` +
@@ -179,8 +182,9 @@ export function markBestCard(offers: any[], price: number | null) {
 }
 
 export function detectStore(url: string, text = "") {
-  const u = (url || "").toLowerCase();
-  for (const [name, domains] of Object.entries(STORES)) if (domains.some((d) => u.includes(d))) return name;
+  let host = "";
+  try { host = new URL(url).hostname.toLowerCase(); } catch { /* text-only classification below */ }
+  for (const [name, domains] of Object.entries(STORES)) if (domains.some((d) => host === d || host.endsWith(`.${d}`))) return name;
   const t = (text || "").toLowerCase();
   for (const name of Object.keys(STORES)) if (t.includes(name.toLowerCase())) return name;
   return "Other";
@@ -233,7 +237,10 @@ export function extractDiscount(text: string, price: number | null, mrp: number 
   return vals.length ? Math.max(...vals) : 0;
 }
 
-export function classify(text: string, discount: number, rules: any) {
+export function classify(text: string, discount: number, rules: any, store?: string, price?: number | null) {
+  // Offer pages and posts with no single product price go to Offers & Coupons.
+  if (store && OFFER_STORES.includes(store)) return ["offer"];
+  if (store && price == null && OFFER_RE.test(text)) return ["offer"];
   const cats: string[] = [];
   const isGift = GIFT_RE.test(text);
   const r = (k: string, d: any) => (rules[k] === undefined || rules[k] === null ? d : rules[k]);
@@ -270,12 +277,12 @@ export function parseItem(text: string, links: string[], image: string | null, r
   const url = links.find((l) => detectStore(l) !== "Other") || links[0];
   const [price, mrp] = extractPrices(text);
   const discount = extractDiscount(text, price, mrp);
-  return { title: makeTitle(text), text: text.slice(0, 1500), url, store: detectStore(url, text), price, mrp, discount, categories: classify(text, discount, rules), image };
+  return { title: makeTitle(text), text: text.slice(0, 1500), url, store: detectStore(url, text), price, mrp, discount, categories: classify(text, discount, rules, detectStore(url, text), price), image };
 }
 
-async function fetchText(url: string, init: any = {}, timeoutMs = 20000) {
+async function fetchText(url: string, init: any = {}, timeoutMs = 20000, attempts = 3) {
   let lastError: any;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     try {
       return await fetch(url, { ...init, redirect: init.redirect || "follow", headers: { ...UA, ...(init.headers || {}) }, signal: AbortSignal.timeout(timeoutMs) });
     } catch (error) {
@@ -336,8 +343,8 @@ export async function fetchTelegram(username: string) {
 
 const htmlToText = (h: string) => parseHtml((h || "").replace(/<[^>]+>/g, " ")).text.replace(/\s+/g, " ").trim();
 
-export async function fetchRss(url: string) {
-  const r = await fetchText(url);
+export async function fetchRss(url: string, options: { timeoutMs?: number; attempts?: number } = {}) {
+  const r = await fetchText(url, {}, options.timeoutMs ?? 20000, options.attempts ?? 3);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const text = await r.text();
   if (/<!doctype\s+html|<html[\s>]/i.test(text.slice(0, 2000))) throw new Error("This URL returned a web page, not an RSS/Atom feed. Use the site's feed URL.");
@@ -474,9 +481,9 @@ export function stripAffiliate(url: string) {
   if (!p) return url;
   if (p.pathname.includes("/dealsmagnet")) p.pathname = p.pathname.replace(/^\/dealsmagnet\.com/, "").replace("/dealsmagnet/p/dealsmagnet_deals", "/product/p/item");
   const host = p.host.toLowerCase();
-  if (host.includes("amazon.")) {
+  if (["amazon.in", "www.amazon.in", "amazon.com", "www.amazon.com"].includes(host)) {
     const m = p.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})/);
-    if (m) return `https://www.amazon.in/dp/${m[1]}`;
+    if (m) return `https://${p.hostname}/dp/${m[1]}`;
   }
   let params = [...p.searchParams.entries()].filter(([k]) => !AFF_KEYS.has(k.toLowerCase()));
   if (host.includes("flipkart.")) params = params.filter(([k]) => ["pid", "lid", "marketplace", "q", "otracker"].includes(k)).slice(0, 3).filter(([k]) => k !== "otracker");
@@ -563,10 +570,10 @@ export function cleanTitle(t: string | null | undefined) {
 
 export function amazonAffiliate(url: string, tag: string) {
   tag = (tag || "").trim();
-  if (!tag) return url;
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,60}-21$/.test(tag)) throw new Error("Save your issued Amazon.in Associates tracking tag ending in -21 first");
   const p = tryUrl(url);
-  if (!p) return url;
-  const params = [...p.searchParams.entries()].filter(([k]) => k.toLowerCase() !== "tag");
+  if (!p || p.protocol !== "https:" || !["amazon.in", "www.amazon.in"].includes(p.hostname)) throw new Error("Your Amazon.in tag only supports Amazon.in links, not another marketplace");
+  const params = [...p.searchParams.entries()].filter(([k]) => !AFF_KEYS.has(k.toLowerCase()));
   params.push(["tag", tag]);
   return rebuild(p, params);
 }
@@ -574,11 +581,7 @@ export function amazonAffiliate(url: string, tag: string) {
 export const AFFILIATE_SERVICES = ["extrape", "earnkaro", "sankmo", "original"];
 
 export function affiliateRoute(store: string, settings: any) {
-  const chain = settings.affiliate_chains?.[store];
-  if (Array.isArray(chain)) return chain[0] || "original";
-  if (store === "Amazon") return settings.amazon_route === "earnkaro" ? "earnkaro" : "extrape";
-  const route = settings.affiliate_routes?.[store];
-  return route === "amazon" ? "earnkaro" : AFFILIATE_SERVICES.includes(route) ? route : "extrape";
+  return routeForStore(settings, store)[0];
 }
 
 export function missingTokenError(route: string, settings: any) {
@@ -646,10 +649,11 @@ export function converterChain(settings: any, preferred?: string) {
 }
 
 async function runChain(url: string, settings: any, chain: string[]) {
-  if (!chain.length) throw new Error("Add your ExtraPe access token in Affiliate links settings");
+  if (!chain.length) throw new Error("Add your ExtraPe access token or another converter chosen in this store's route in Affiliate Setup.");
   const errors: string[] = [];
   for (const key of chain) {
-    const [name, fn] = CONVERTERS[key];
+    if (key === "original") return url;
+    const [name, fn] = key === "amazon" ? ["Amazon.in", (u, s) => amazonAffiliate(u, s.amazon_tag)] : CONVERTERS[key];
     try { return await fn(url, settings); } catch (e) {
       const msg = e?.message || `${name} conversion failed`;
       void import("./telegram-converter.server").then((t) => t.alertIfKeyFailed(msg)).catch(() => {});
@@ -695,7 +699,6 @@ export const STATUS_SAMPLES: Record<string, string> = {
   Myntra: "https://www.myntra.com/men-tshirts", Ajio: "https://www.ajio.com/men-jeans/c/830216013", Shopsy: "https://www.shopsy.in/",
   Meesho: "https://www.meesho.com/", Croma: "https://www.croma.com/", "Tata CLiQ": "https://www.tatacliq.com/", JioMart: "https://www.jiomart.com/",
   Nykaa: "https://www.nykaa.com/", Xiaomi: "https://www.mi.com/in/", Snapdeal: "https://www.snapdeal.com/", "Reliance Digital": "https://www.reliancedigital.in/",
-  Paytm: "https://paytm.com/", Swiggy: "https://www.swiggy.com/", Zomato: "https://www.zomato.com/", Woohoo: "https://www.woohoo.in/", Gyftr: "https://www.gyftr.com/",
 };
 const UNSUPPORTED = /INVALID_URL|does not support|don't have these stores|0 earning|requires approval|not supported|no converted link returned/i;
 
@@ -722,18 +725,11 @@ export async function testConverterKeys(settings: any) {
 export async function convertLink(url: string, settings: any) {
   if (settings.convert_enabled === false || isDealSite(url)) return url;
   const store = detectStore(url);
-  const chain = settings.affiliate_chains?.[store];
-  if (Array.isArray(chain)) {
-    if (!chain.length || chain[0] === "original") return url;
-    const usable = chain.filter((k: string) => k in CONVERTERS && CONVERTERS[k][2](settings));
-    if (!usable.length) throw new Error(`No token is saved for the converters chosen for ${store} (${chain.map((k: string) => CONVERTERS[k]?.[0] || k).join(" → ")})`);
-    return runChain(url, settings, usable);
-  }
-  const route = affiliateRoute(store, settings);
-  if (route === "original") return url;
-  if (store === "Amazon") return runChain(url, settings, converterChain(settings, route).filter((k) => k !== "sankmo"));
-  const explicit = settings.affiliate_routes?.[store];
-  return runChain(url, settings, converterChain(settings, explicit && explicit !== "extrape" ? route : undefined));
+  if (OFFER_STORES.includes(store)) return url;
+  const chain = routeForStore(settings, store);
+  if (chain[0] === "original") return url;
+  const usable = chain.filter((k: string) => k === "amazon" ? store === "Amazon" : k in CONVERTERS && CONVERTERS[k][2](settings));
+  return runChain(url, settings, usable);
 }
 
 async function convertWithEarnKaro(url: string, settings: any) {

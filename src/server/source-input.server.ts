@@ -15,9 +15,14 @@ export function normalizeSource(kind: string, input: string) {
   if (!["rss", "telegram", "web", "x"].includes(kind)) throw new Error("Choose Telegram, RSS feed, Website page or X account.");
   if (kind === "telegram") return normalizeTelegram(input);
   if (kind === "x") {
-    const u = input.trim().replace(/^@/, "").replace(/^https?:\/\/(www\.)?(x|twitter)\.com\//i, "").split(/[/?#]/)[0] || "";
+    let u = input.trim().replace(/^@/, "");
+    if (/^https?:\/\//i.test(u)) {
+      const parsed = new URL(u);
+      if (!["x.com", "www.x.com", "twitter.com", "www.twitter.com"].includes(parsed.hostname) || parsed.username || parsed.password || parsed.port) throw new Error("Use an X profile URL or @username");
+      u = parsed.pathname.split("/").filter(Boolean)[0] || "";
+    }
     if (!/^[A-Za-z0-9_]{1,15}$/.test(u)) throw new Error("Enter an X username like @dealsindia");
-    return u;
+    return u.toLowerCase();
   }
   let url: URL;
   try { url = new URL(input.trim()); } catch { throw new Error("Enter a full https:// source URL."); }

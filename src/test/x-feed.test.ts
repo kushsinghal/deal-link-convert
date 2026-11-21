@@ -24,6 +24,6 @@ describe("feed backups", () => {
   it("maps cookie-read posts and drops t.co and x.com links", () => {
     const [item] = mapScraped([{ id: "9", text: "Loot ₹199 https://t.co/abc", urls: ["https://www.flipkart.com/x/p/itm9", "https://x.com/a/status/1"], photos: [{ url: "https://pbs.twimg.com/b.jpg" }], timeParsed: new Date("2026-06-01T00:00:00Z") }], "deals");
     expect(item).toMatchObject({ ext_id: "9", links: ["https://www.flipkart.com/x/p/itm9"], image: "https://pbs.twimg.com/b.jpg", posted_at: "2026-06-01T00:00:00.000Z" });
-    expect(item.text).toBe("Loot ₹199\nhttps://www.flipkart.com/x/p/itm9");
+    expect(item!.text).toBe("Loot ₹199\nhttps://www.flipkart.com/x/p/itm9");
   });
 });

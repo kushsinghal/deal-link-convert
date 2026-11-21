@@ -12,7 +12,7 @@ export async function testSource(id: string) {
   try {
     const value = normalizeSource(source.kind, source.value);
     const { items, via } = await fetchSourceItems({ ...source, value });
-    const from = via ? ` (main failed, read from backup ${via})` : "";
+    const from = via ? ` (read via ${via})` : "";
     result = { status: items.length ? "ok" : "empty", posts: items.length, via, message: items.length ? `${items.length} posts readable${from}. No deals imported or sent.` : `Source loaded${from}, but no readable posts were found.`, checked_at, latency_ms: Date.now() - start };
   } catch (e) {
     result = { status: "error", posts: 0, message: String(e instanceof Error ? e.message : "Could not read source").slice(0, 300), checked_at, latency_ms: Date.now() - start };

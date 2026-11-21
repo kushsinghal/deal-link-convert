@@ -120,8 +120,8 @@ describe("Telegram affiliate conversion", () => {
       return new Response("<html></html>");
     }));
     const result = await convertAffiliateText(text, { earnkaro_token: "configured", amazon_route: "earnkaro", affiliate_routes: { Other: "original" } }, [{ type: "url", offset: 5, length: 11 }, { type: "url", offset: 26, length: 25 }]);
-    expect(result.message).toBe("Loot @Amazon and news  ok");
-    expect(result.entities).toEqual([{ type: "text_link", offset: 5, length: 7, url: "https://ekaro.in/mine" }]);
+    expect(result.message).toBe("Loot @Amazon and news @Link ok");
+    expect(result.entities).toEqual([{ type: "text_link", offset: 5, length: 7, url: "https://ekaro.in/mine" }, { type: "text_link", offset: 22, length: 5, url: "https://example.org/story" }]);
   });
   it("edits paired channel posts in place instead of reposting", async () => {
     vi.stubEnv("SESSION_SECRET", "test-session-signing-secret-for-telegram");
@@ -132,12 +132,18 @@ describe("Telegram affiliate conversion", () => {
     expect(state.sends[0].url).toContain("/editMessageCaption");
     expect(state.sends[0].body).toMatchObject({ chat_id: -100123, message_id: 2, caption: "Offer @Amazon", caption_entities: [{ type: "text_link", offset: 6, length: 7, url: "https://ekaro.in/mine" }] });
   });
-  it("does not re-wrap links that already use the owner's affiliate account", async () => {
+  it("expands and reconverts ekaro links rather than trusting the domain as owned", async () => {
     mockProviders();
+    vi.stubGlobal("fetch", vi.fn(async (input: any) => {
+      if (String(input) === "https://ekaro.in/abc") return new Response("", { status: 302, headers: { location: "https://www.flipkart.com/item/p/itm123?affid=other" } });
+      if (String(input).includes("ekaro-api")) return Response.json({ success: 1, data: "https://ekaro.in/mine" });
+      return new Response("<html></html>");
+    }));
     const result = await convertAffiliateText("Grab https://ekaro.in/abc now", { earnkaro_token: "configured" });
-    expect(fetch).not.toHaveBeenCalled();
-    expect(result.message).toBe("Grab @Link now");
-    expect(result.entities).toEqual([{ type: "text_link", offset: 5, length: 5, url: "https://ekaro.in/abc" }]);
+    expect(fetch).toHaveBeenCalled();
+    expect(result.items[0]?.cleaned).toBe("https://www.flipkart.com/item/p/itm123");
+    expect(result.message).toBe("Grab @Flipkart now");
+    expect(result.entities).toEqual([{ type: "text_link", offset: 5, length: 9, url: "https://ekaro.in/mine" }]);
   });
   it("removes a failed link, and its line when it stood alone, without an earning label", async () => {
     mockProviders();

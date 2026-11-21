@@ -1,14 +1,11 @@
 import * as engine from "./engine.server";
 
-const EARN_LINK_HOSTS = ["ekaro.in"];
-
 function isOwnAffiliateLink(url: string, settings: any) {
   let p: URL;
   try { p = new URL(url); } catch { return false; }
   const host = p.hostname.toLowerCase();
-  if (EARN_LINK_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) return true;
   const tag = String(settings?.amazon_tag || "").trim();
-  return !!tag && host.includes("amazon.") && p.searchParams.get("tag") === tag;
+  return !!tag && ["amazon.in", "www.amazon.in"].includes(host) && p.searchParams.get("tag") === tag && engine.affiliateRoute("Amazon", settings) === "amazon";
 }
 
 export async function convertAffiliate(original: string, settings: any, fast = false) {
@@ -17,10 +14,9 @@ export async function convertAffiliate(original: string, settings: any, fast = f
   }
   const cleaned = await engine.cleanLink(original, fast);
   try {
-    // In the bot, a link that is not a known shop gets one quick attempt instead of the whole backup chain.
-    const quick = fast && engine.detectStore(cleaned) === "Other";
-    const converted = await engine.convertLink(cleaned, quick ? { ...settings, sankmo_token: "", earnkaro_token: settings.extrape_token ? "" : settings.earnkaro_token } : settings);
-    return { original, cleaned, converted, changed: converted !== cleaned, error: null as string | null, store: engine.detectStore(cleaned) };
+    const converted = await engine.convertLink(cleaned, settings);
+    const keepClean = settings.convert_enabled === false || engine.affiliateRoute(engine.detectStore(cleaned), settings) === "original";
+    return { original, cleaned, converted, changed: converted !== cleaned, keep_clean: keepClean, error: null as string | null, store: engine.detectStore(cleaned) };
   } catch (error) {
     const store = engine.detectStore(cleaned);
     // Links to sites that are not shops (news, social, blogs) are simply left as they are.
@@ -50,12 +46,12 @@ export async function convertAffiliateText(text: string, settings: any, entities
   spans.sort((a, b) => a.start - b.start);
   const linkEntities = entities.filter((e) => e.type === "text_link" && e.url);
   const urls = [...new Set([...spans.map((s) => s.url), ...linkEntities.map((e) => e.url!)])];
+  if (urls.length > 10) throw new Error("Send up to 10 links in one message");
   const items = await Promise.all(urls.map((url) => {
-    const job = convertAffiliate(url, settings, true);
-    if (engine.detectStore(url) !== "Other" || engine.isShortLink(url)) return job;
-    // An ordinary web page must never delay the reply for the real shop links.
-    const skip = new Promise<Awaited<typeof job>>((resolve) => setTimeout(() => resolve({ original: url, cleaned: url, converted: url, changed: false, error: null, store: "Other", unsupported: true } as any), 1800));
-    return Promise.race([job, skip]);
+    const host = new URL(url).hostname;
+    if (/^(?:[^.]+\.)?(?:x\.com|twitter\.com|t\.me|telegram\.me|facebook\.com|instagram\.com|youtube\.com|youtu\.be|wa\.me|whatsapp\.com)$/.test(host))
+      return Promise.resolve({ original: url, cleaned: url, converted: url, changed: false, error: null, store: "Other", unsupported: true });
+    return convertAffiliate(url, settings, true);
   }));
   const byUrl = new Map(items.map((i) => [i.original, i]));
 
@@ -63,7 +59,7 @@ export async function convertAffiliateText(text: string, settings: any, entities
   let cursor = 0;
   const replacements: Replacement[] = [];
   const labelEntities: Entity[] = [];
-  const dropped = (item: any) => !!item.error || (!item.changed && !item.own);
+  const dropped = (item: any) => !!item.error || (!item.changed && !item.own && !item.keep_clean);
   for (const span of spans) {
     const item = byUrl.get(span.url)!;
     const drop = dropped(item);

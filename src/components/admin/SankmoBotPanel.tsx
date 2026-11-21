@@ -28,28 +28,34 @@ export const ConverterOrderPanel = ({ s, setS }) => {
 
 export const SankmoBotPanel = () => {
   const [st, setSt] = useState(null), [phone, setPhone] = useState(""), [code, setCode] = useState(""), [pw, setPw] = useState(""), [busy, setBusy] = useState(false);
-  const load = async () => { try { setSt((await api.get("/sankmo-bot/status")).data); } catch (e) { toast.error(errMsg(e)); } };
+  const [error, setError] = useState("");
+  const load = async () => { try { setSt((await api.get("/sankmo-bot/status")).data); } catch (e) { setError(errMsg(e)); } };
   useEffect(() => { load(); }, []);
   const call = async (path, body, msg) => {
     setBusy(true);
-    try { await api.post(`/sankmo-bot/${path}`, body); toast.success(msg); setCode(""); setPw(""); await load(); } catch (e) { toast.error(errMsg(e)); } finally { setBusy(false); }
+    setError("");
+    try { const { data } = await api.post(`/sankmo-bot/${path}`, body); toast.success(data.password_required ? "Enter your Telegram two-step password" : path === "send-code" ? (data.via_app ? "Code sent to your Telegram app" : "Telegram sent a login code") : msg); setCode(""); setPw(""); if (data.connected) setPhone(""); await load(); } catch (e) { setError(errMsg(e)); await load(); } finally { setBusy(false); }
   };
-  if (!st) return null;
+  if (!st) return <Panel testid="sankmo-bot-panel" title="Sankmo via Telegram"><p data-testid="sankmo-bot-loading">{error || "Loading Telegram setup…"}</p><Button data-testid="sankmo-bot-retry" onClick={load}>Retry</Button></Panel>;
   return <Panel testid="sankmo-bot-panel" title="Sankmo via Telegram (@sankmo_bot)" desc="Your Telegram account sends each link to @sankmo_bot and reads the converted link it replies with. Log in to @sankmo_bot with your Sankmo account in Telegram first.">
-    {!st.credentials_ready ? <p data-testid="sankmo-bot-missing-creds" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">Telegram API ID and API Hash are not added yet.</p>
-      : st.connected ? <div className="space-y-3">
+    <p data-testid="sankmo-api-credentials-status" className={`mb-3 text-xs ${st.credentials_ready ? "text-emerald-800" : "text-amber-800"}`}>{st.credentials_ready ? "API ID & API Hash configured securely" : "API ID & API Hash are missing or invalid. Phone login is unavailable until configured."}</p>
+    <p data-testid="sankmo-api-credentials-help" className="mb-3 text-xs text-slate-600">Server settings: <code>TELEGRAM_API_ID</code> and <code>TELEGRAM_API_HASH</code>. These are not a BotFather token or a Sankmo API token.</p>
+    <a data-testid="telegram-api-tools-link" href="https://my.telegram.org/apps" target="_blank" rel="noreferrer" className="mb-4 inline-block text-xs font-semibold underline">Telegram API development tools ↗</a>
+    {error && <p data-testid="sankmo-bot-error" role="alert" className="mb-3 text-xs text-rose-700">{error}</p>}
+    {st.connected ? <div className="space-y-3">
         <p data-testid="sankmo-bot-connected" className="text-sm text-emerald-800">Connected as <b>{st.user}</b>. Sankmo links convert through @sankmo_bot.</p>
         <Button data-testid="sankmo-bot-disconnect" className={ghostBtn} disabled={busy} onClick={() => window.confirm("Log this app out of your Telegram account?") && call("disconnect", {}, "Telegram disconnected")}>Disconnect</Button>
       </div>
       : <div className="space-y-3">
-        <div className="flex gap-2"><Input data-testid="sankmo-bot-phone-input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+919876543210" className={fieldCls} />
-          <Button data-testid="sankmo-bot-send-code" className={ghostBtn} disabled={busy || !phone.trim()} onClick={() => call("send-code", { phone }, "Code sent to your Telegram app")}>Send code</Button></div>
+        <label htmlFor="sankmo-phone" className="text-xs font-semibold">Telegram phone number</label>
+        <div className="flex flex-wrap gap-2"><Input id="sankmo-phone" data-testid="sankmo-bot-phone-input" type="tel" autoComplete="tel" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+919876543210" className={`${fieldCls} min-w-0 flex-1`} />
+          <Button data-testid="sankmo-bot-send-code" className={ghostBtn} disabled={busy || !phone.trim() || !st.credentials_ready} onClick={() => call("send-code", { phone }, "Code sent")}>{st.code_sent ? "Send new code" : "Send code"}</Button></div>
         {st.code_sent && <>
-          <Input data-testid="sankmo-bot-code-input" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Login code from Telegram" className={fieldCls} />
-          <Input data-testid="sankmo-bot-password-input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Telegram two-step password (only if you set one)" className={fieldCls} />
-          <Button data-testid="sankmo-bot-verify" className={primaryBtn} disabled={busy || !code.trim()} onClick={() => call("verify", { code, password: pw }, "Telegram connected")}>Log in</Button>
+          {!st.password_required && <Input aria-label="Telegram login code" data-testid="sankmo-bot-code-input" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="Login code from Telegram" className={fieldCls} />}
+          {st.password_required && <Input aria-label="Telegram two-step password" data-testid="sankmo-bot-password-input" type="password" autoComplete="off" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Telegram two-step password" className={fieldCls} />}
+          <Button data-testid="sankmo-bot-verify" className={primaryBtn} disabled={busy || (st.password_required ? !pw : !code.trim())} onClick={() => call("verify", { code, password: pw }, "Telegram connected")}>{st.password_required ? "Verify password" : "Verify code"}</Button>
         </>}
-        <p className="text-xs text-slate-500">Your login stays on the server and is never shown in the browser. Links are sent at most one every 1.5 seconds so Telegram doesn't flag your account.</p>
+        <p data-testid="sankmo-session-notice" className="text-xs text-slate-500">Your encrypted login session stays on the server. Codes expire; Telegram may require a two-step password or rate-limit this connection. A connected account does not guarantee Sankmo conversion.</p>
       </div>}
   </Panel>;
 };
