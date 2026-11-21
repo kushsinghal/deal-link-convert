@@ -1,0 +1,21 @@
+{
+  "summary": "Backend-only check of the ExtraPe '+' (encoded space) fix on the PREVIEW URL only. 5/5 pytest cases pass, using 9 real ExtraPe conversions. (1) Myntra with '+': https://www.myntra.com/men-tshirts?f=Brand%3ALee+Cooper&sort=new -> https://myntr.in/cexUdp. The code has no '+', ':' or '|'. It returns 302 to myntra.com/men-tshirts?f=Brand%3ALee%20Cooper&sort=new&... (2) Ajio with '+' -> https://ajiio.co/r4oH1d. This returns 302 to the ajiotrk.vibconnect.in tracker, and its url param decodes to https://www.ajio.com/men-jeans/c/830216013?query=%3Arelevance%3Abrand%3ALee%20Cooper%3Agenderfilter%3AMen&. Following the tracker lands on ajio.com with the full query intact. The final ajio.com 403 is Ajio blocking bots, not an app bug. (3) Regressions: Flipkart iPhone -> https://fkrt.co/cqnGPM (302 to dl.flipkart.com with affid). Plain Myntra ?sort=new -> https://myntr.in/5qhH60, which redirects with sort=new. (4) POST /convert/bulk with all 4 links -> all changed=true, no errors and no broken short links (myntr.in/uYZuPn, ajiio.co/vDP85A, fkrt.co/bHflLx, myntr.in/2SSA3p). All 4 redirect correctly and save_error is null.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_iter9_extrape_plus_fix.py", "/app/test_reports/pytest/iter9.xml"],
+  "action_items": [
+    "Deploy the fix to production, then re-convert the 18 broken live myntr.in/ajiio.co deals: POST /api/public/deals/reconvert, or bulk convert their clean_url. Find them with affiliate_url matching (ajiio.co|myntr.in)/\\w+[+:&]."
+  ],
+  "critical_code_review_comments": [
+    "engine.server.ts convertWithExtraPe: the whole query (including & and =) is encodeURIComponent'd when it contains + or %20. This relies on ExtraPe decoding exactly once. It is verified working today, but it is fragile if ExtraPe changes its behaviour. The broken-link guard is the safety net.",
+    "The broken-link guard (/[+:|]/ on any candidate whose host is not the store's) would also reject a valid long affiliate URL on another host that has a raw '+', ':' or '|' in its query, e.g. a tracker. ExtraPe returns short links today, so there is no impact now. A safer guard would only check the path or query of known shorteners (myntr.in, ajiio.co, fkrt.co, ...).",
+    "Queries that hold a literal encoded plus (%2B) are left alone, which is correct. Encoded-space detection only checks the query string, not the path. That is fine for the reported cases."
+  ],
+  "updated_files": ["/app/backend/tests/test_iter9_extrape_plus_fix.py"],
+  "success_rate": {"backend": "100% (5/5)", "frontend": "not tested (backend only requested)"},
+  "seed_data_creation": "Bulk convert saved 4 deals into the preview DB (allowed by the brief). deal_ids: 1a102549-4b8f-4059-9d37-5fb109d85e53, a2c5bd04-fb93-4e17-8780-4e1a48ff365e, 3d7a4892-a705-4130-8a9f-9e9b0c45cbd0, ca468564-5e57-49a9-beca-67d8aa984209. Not deleted.",
+  "test_credentials": "Admin password from /app/memory/test_credentials.md (POST /api/public/auth/login) worked.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Production was not touched. ajiio.co links 302 to ajiotrk.vibconnect.in/click?...&url=<encoded target>. Decode the url param to check the target, because ajio.com returns 403 to server-side requests. Each pytest run makes about 8 real ExtraPe conversions (4 single + 4 bulk)."
+}

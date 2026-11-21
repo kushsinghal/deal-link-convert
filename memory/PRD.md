@@ -132,3 +132,7 @@
 - Emergent deploy FAILED: platform runtime cannot run the Node SSR server (RCA in /app/deployer-agent-docs). Options offered: Render free (recommended, render.yaml ready) vs rewrite to Python. Awaiting user choice.
 - Added user's 38 sources (25 Telegram, 10 RSS, 3 web) to preview DB; test-all: 35 ok, desidime web x2 HTTP403, dealsmagnet web page empty.
 - Added Telegram /status command (statusReport in telegram-converter.server.ts, testConverterKeys in engine.server.ts): live key check + feed health. Verified via SSR module run. ExtraPe expiry alert already existed (KEY_ALERTS); both need converter bot token set in Control Room (not set yet).
+- LIVE on Render: https://dealloot.onrender.com (user's existing Mongo data: 40 sources, 109 deals, converter bot @earnadobot webhook on current URL). Read-only live test iteration_8: all pages/admin tabs OK.
+- FIXED (preview, needs GitHub push + Render redeploy): ExtraPe cut URLs at '+'/space → broken myntr.in/ajiio.co links (18/109 live). Query now encoded when it has +/%20; broken short links rejected. iteration_9 5/5 pass. After deploy: Control Room → Reconvert (last 24h).
+- Backlog: expiring Telegram CDN images (47/109 cards no image) → proxy/store images; paginate admin Deals tab; 404 page styling.
+- Cron: cron-job.org POST /api/public/cron/tick, header Authorization: Bearer CRON_SECRET, every 5 min.
