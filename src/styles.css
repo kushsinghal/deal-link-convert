@@ -210,3 +210,7 @@ html.dark .border-emerald-200, html.dark .border-emerald-300 { border-color: rgb
 html.dark .border-amber-300, html.dark .border-amber-400 { border-color: rgb(245 158 11 / 0.45); }
 html.dark .border-rose-300, html.dark .border-purple-300, html.dark .border-cyan-300, html.dark .border-orange-300 { border-color: rgb(148 163 184 / 0.35); }
 html.dark [data-state="active"].data-\[state\=active\]\:bg-slate-900 { background-color: #E8ECF2; color: #0E1218; }
+html.dark button:disabled, html.dark input:disabled, html.dark select:disabled, html.dark textarea:disabled { opacity: 0.78; }
+html.dark .recharts-text { fill: #B4BECC; }
+html.dark .recharts-cartesian-grid line { stroke: #323C4D; }
+html.dark .recharts-default-tooltip { background-color: #1A1F29 !important; border-color: #414D62 !important; color: #F1F5F9; }

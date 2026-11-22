@@ -9,6 +9,7 @@ vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: 
   findOne: async () => name === "telegram_converter_chats" ? state.paired ? {} : null : state.done ? { done: true } : null,
   insertOne: async () => ({}),
   insertMany: async () => ({}),
+  deleteMany: async () => ({}),
   find: () => ({ toArray: async () => [] }),
   updateOne: async (_filter: any, patch: any) => { if (patch.$set?.done) state.done = true; return { modifiedCount: 1 }; },
 }) }), db: { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: "main", telegram_converter_token: "123456:" + "a".repeat(30), sankmo_token: "configured", earnkaro_token: "configured" }, error: null }) }) }) }) } }));

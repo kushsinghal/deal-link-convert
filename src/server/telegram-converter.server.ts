@@ -3,6 +3,7 @@ import { z } from "zod";
 import { mongo } from "./db.server";
 import { getSettings, publishConversion } from "./core.server";
 import { convertAffiliateText } from "./affiliate.server";
+import { productKey } from "./engine.server";
 import { BOT_COMMANDS, BOT_HELP } from "../lib/bot-commands";
 
 const tokenSchema = z.string().regex(/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/, "Enter the bot token from BotFather");
@@ -177,6 +178,19 @@ export async function disconnectConverter() {
   return { connected: false };
 }
 
+/** Marks products as posted in one chat; returns the keys that were not posted there inside the window. */
+async function claimProducts(db: any, keys: string[], windowMs: number) {
+  const col = db.collection("converter_products");
+  const at = Date.now();
+  const got = await Promise.all(keys.map(async (key) => {
+    try { await col.updateOne({ _id: key, at: { $lte: at - windowMs } }, { $set: { at } }, { upsert: true }); return key; } catch (e: any) {
+      if (e?.code === 11000) return null;
+      throw e;
+    }
+  }));
+  return got.filter((k): k is string => !!k);
+}
+
 /** Lets tests wait for the post-reply work. */
 export let lastBackground: Promise<void> = Promise.resolve();
 
@@ -232,12 +246,27 @@ export async function receiveConverter(request: Request, body: unknown) {
   }
   const receivedAt = Date.now();
   const messageAt = typeof (msg as any).date === "number" ? (msg as any).date * 1000 : receivedAt;
+  let claimed: string[] = [];
   try {
     const result = await convertAffiliateText(text, settings, msg.entities || msg.caption_entities || []);
     const failed = result.items.filter((i) => i.error);
     const changed = result.items.some((i) => i.changed && !i.error);
     const own = result.items.some((i: any) => i.own || i.keep_clean);
     const direct = msg.chat.type !== "channel";
+    // Same product again in the same channel or group: one database check, done after the links are cleaned.
+    const repeatMinutes = msg.chat.type === "private" ? 0 : Math.max(0, Number(settings.converter_repeat_minutes ?? 360) || 0);
+    if (repeatMinutes && (changed || own)) {
+      const keys = [...new Set(result.items.filter((i: any) => !i.error && i.store !== "Other").map((i: any) => `${chatKey}:${productKey(i.cleaned)}`))];
+      claimed = await claimProducts(db, keys, repeatMinutes * 60_000);
+      // In a channel the repeat post is deleted; without delete rights it is converted as usual.
+      if (keys.length && !claimed.length && (direct || await telegramCall(token, "deleteMessage", { chat_id: msg.chat.id, message_id: msg.message_id }).then(() => true, () => false))) {
+        await updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } });
+        const at = new Date().toISOString();
+        lastBackground = db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, store: i.store, original: i.original, cleaned: i.cleaned, converted: null,
+          status: "repeat", error: `Same product was already posted in this chat in the last ${repeatMinutes} min`, message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: at, convert_ms: Date.now() - receivedAt, total_ms: Math.max(0, Date.now() - messageAt) }))).then(() => {}, (e: any) => console.error("repeat log failed", e?.message));
+        return Response.json({ ok: true });
+      }
+    }
     // Convert what can be converted and remove every other link; normal text stays exactly as sent.
     let reply: Record<string, unknown> | null = null;
     if (!result.items.length) reply = null;
@@ -263,6 +292,7 @@ export async function receiveConverter(request: Request, body: unknown) {
       await db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, store: i.store, original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted,
         status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error || (!i.changed && !i.own ? "Not a convertible shop link; removed" : null), message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: new Date(repliedAt).toISOString(),
         convert_ms: repliedAt - receivedAt, total_ms: Math.max(0, repliedAt - messageAt) })));
+      if (claimed.length) await db.collection("converter_products").deleteMany({ at: { $lt: Date.now() - 8 * 86400_000 } }).catch(() => {});
       for (const i of result.items) await alertIfKeyFailed(i.error);
       for (const item of result.items) {
         if (item.error || !item.changed) continue;
@@ -273,6 +303,7 @@ export async function receiveConverter(request: Request, body: unknown) {
     return Response.json(reply ? { method: "sendMessage", ...reply } : { ok: true });
   } catch (error) {
     await updates.updateOne({ _id: key }, { $set: { locked_until: 0 } });
+    if (claimed.length) await db.collection("converter_products").deleteMany({ _id: { $in: claimed } as any }).catch(() => {});
     throw error;
   }
 }

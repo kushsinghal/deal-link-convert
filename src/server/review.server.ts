@@ -1,7 +1,9 @@
 import { mongo } from "./db.server";
+import { stripAffiliate } from "./engine.server";
 
 export async function reviewDeals() {
-  return (await mongo()).collection("deals").find({}, { projection: { _id: 0 } }).sort({ created_at: -1 }).limit(500).toArray();
+  const rows = await (await mongo()).collection("deals").find({}, { projection: { _id: 0 } }).sort({ created_at: -1 }).limit(500).toArray();
+  return rows.map((d: any) => d.converted ? d : { ...d, affiliate_url: stripAffiliate(d.clean_url || d.affiliate_url || d.url || "") });
 }
 
 export async function saveReview(id: string, body: any) {

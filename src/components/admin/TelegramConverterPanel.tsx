@@ -16,6 +16,10 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
   const username = settings.telegram_converter_username;
   const labelStyle = settings.converter_label_style || "store";
   useEffect(() => { if (saved) run("status"); }, []);
+  const repeatMinutes = Number(settings.converter_repeat_minutes ?? 360);
+  async function setRepeat(minutes: number) {
+    try { await api.put("/settings", { converter_repeat_minutes: minutes }); reload(); toast.success(minutes ? "Repeat check saved" : "Repeat check turned off"); } catch (error) { toast.error(errMsg(error)); }
+  }
   async function setLabelStyle(style: "store" | "link") {
     try { await api.put("/settings", { converter_label_style: style }); reload(); } catch (error) { toast.error(errMsg(error)); }
   }
@@ -70,6 +74,14 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
       </div>}
       {status?.chats && <p data-testid="telegram-connected-chats" className="break-words text-sm text-slate-600">Connected chats: {status.chats.length ? status.chats.map((c: any) => `${c.type} ${c.chat_id}`).join(", ") : "None"}</p>}
       {status?.error && <p data-testid="telegram-connection-error" role="alert" className="text-sm text-destructive">{status.error}</p>}
+      <div className="space-y-2 border-t border-slate-200 pt-4">
+        <Label htmlFor="converter-repeat">Skip the same product in the same channel</Label>
+        <select id="converter-repeat" data-testid="converter-repeat-select" value={repeatMinutes} onChange={(e) => setRepeat(Number(e.target.value))}
+          className="block h-9 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800">
+          {[[0, "Off"], [30, "30 minutes"], [60, "1 hour"], [180, "3 hours"], [360, "6 hours"], [720, "12 hours"], [1440, "24 hours"], [2880, "2 days"]].map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+        </select>
+        <p data-testid="converter-repeat-help" className="text-xs text-slate-500">Each channel or group is checked on its own. If a product was already posted in that chat within this time, the repeat post is deleted from the channel (the bot needs the “Delete messages” admin right; without it the post is converted as usual). In groups the bot simply does not reply. Your private chat with the bot is never checked.</p>
+      </div>
       <div className="space-y-2 border-t border-slate-200 pt-4">
         <Label>Bot reply style</Label>
         <div className="inline-flex rounded-full border border-slate-300 p-0.5 text-xs font-semibold" role="group" aria-label="Bot reply style">

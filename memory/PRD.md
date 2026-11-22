@@ -178,3 +178,12 @@
 - Public /deals no longer returns source, source_id, source_post_url, text, url, post_title.
 - Sankmo status returns `credentials_problem` (which env var is missing/malformed, never the value); env values tolerate quotes/spaces. User had NOT added TELEGRAM_API_ID/HASH on Render.
 - ScanStatus also on home page for admin. Dark mode text contrast raised.
+
+## 2026-06 — Per-channel repeat check, link hygiene, grouped resend, dark-mode fixes (fork 3)
+- Converter bot: same product (engine.productKey of the cleaned link) is checked PER CHAT in Mongo `converter_products` (_id `<bot>:<chat>:<productKey>`, atomic upsert). Repeat inside `converter_repeat_minutes` (default 360, 0 = off, select in Affiliate Setup → Telegram bot): channel post is deleted (needs "Delete messages" right, else converted as usual); group = no reply; private chat never checked. Logged in Converter History as status `repeat`. One extra DB round trip after conversion.
+- Link hygiene: stripAffiliate drops utm_/af_/aff*/AppsFlyer pid+c etc. and normalises dl.flipkart.com; unknown shorteners (rb.gy, indfs.in, fkrtt.in, short host + code path) count as short links → draft "Needs link" instead of published "Normal link". Admin review list shows the stripped link for unconverted deals.
+- One source post → one Telegram message also for "Send recent" and when a later link of the post fails mid-scan.
+- Dark mode: contrast audit of all admin tabs/home/guides passed 4.5:1 for normal text; fixed washed-out disabled buttons (opacity .78) and price-chart axis/tooltip colours.
+- Verified: tsc clean, vitest 128/128 (2 suites need a backend/.env — absent in this fork; run with a temporary file), real-Mongo check of the claim logic, production build OK. NOT verified: live Telegram channel (delete/edit against real Telegram), Render.
+- Fork note: backend/.env and frontend/.env are missing in this fork and platform secrets are empty, so the Emergent preview (supervisor frontend/backend) does not start. Checks were run with a temporary local server.
+- Open: exact cause of "7 separate posts" not reproduced; ask user for one example source post + which screen (Telegram channel or website) if it still happens after deploy.

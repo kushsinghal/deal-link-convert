@@ -39,7 +39,7 @@ const DEFAULT_SETTINGS = {
   bot_tweets_enabled: true, bot_tweets_public: true, bot_tweets_count: 7,
   check_interval_minutes: 5, check_interval_seconds: 300, post_style: "simple", max_posts_per_update: 20,
   website_max_age_hours: 24, telegram_max_age_minutes: 60, last_run_at: null,
-  copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
+  copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_repeat_minutes: 360, converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
 };
 
 async function check(res: any) {
@@ -357,13 +357,17 @@ export async function fetchSource(src: any, runId?: string | null) {
       if (it.title) parsed.title = it.title.slice(0, 140);
       const parts = splitPost(parsed, it.text, it.links, settings);
       const batch: string[] | undefined = parts.length > 1 ? [] : undefined;
-      for (const part of parts) {
-        if (parts.length === 1 && seenSet.has(`${src.id}:${part.ext_id}`)) continue;
-        if (await ingest(part, src, settings, true, runId, batch)) added++;
-      }
-      if (batch?.length && (runId ? await takePostBudget(runId) : true)) {
-        const group = (await check(await db.from("deals").select("*").in("id", batch))).filter((d) => d.publication_status === "published").sort((a, b) => (a.split_index || 0) - (b.split_index || 0));
-        if (group.length) await postDeal(group[0], null, group);
+      try {
+        for (const part of parts) {
+          if (parts.length === 1 && seenSet.has(`${src.id}:${part.ext_id}`)) continue;
+          if (await ingest(part, src, settings, true, runId, batch)) added++;
+        }
+      } finally {
+        // Links already saved still go out together, even if a later link of the same post failed.
+        if (batch?.length && (runId ? await takePostBudget(runId) : true)) {
+          const group = (await check(await db.from("deals").select("*").in("id", batch))).filter((d) => d.publication_status === "published").sort((a, b) => (a.split_index || 0) - (b.split_index || 0));
+          if (group.length) await postDeal(group[0], null, group);
+        }
       }
     } catch (e) {
       const message = String(e?.message || e).slice(0, 220);
@@ -775,10 +779,16 @@ export async function sendRecent(id: string) {
   if (!d) throw new HttpError(404, "Destination not found");
   const s = await getSettings();
   const deals = await check(await db.from("deals").select("*").eq("publication_status", "published").gte("posted_at", ago(s.telegram_max_age_minutes * 60e3)).order("posted_at", { ascending: false }).limit(500));
-  const match = deals.filter((x) => !(x.posted_to || []).includes(d.name) && destMatches(d, x)).slice(0, Number(s.max_posts_per_update) || 20);
+  // Links that came from one source post go out as one message.
+  const groups = new Map<string, any[]>();
+  for (const x of deals.filter((x) => !(x.posted_to || []).includes(d.name) && destMatches(d, x))) {
+    const key = x.split ? String(x.dedupe_key || x.id).replace(/#\d+$/, "") : x.id;
+    groups.set(key, [...(groups.get(key) || []), x]);
+  }
+  const match = [...groups.values()].slice(0, Number(s.max_posts_per_update) || 20).map((g) => g.sort((a, b) => (a.split_index || 0) - (b.split_index || 0)));
   let sent = 0, failed = 0;
-  for (const x of match) {
-    const r = await postDeal(x, d.id);
+  for (const g of match) {
+    const r = await postDeal(g[0], d.id, g);
     const ok = r.some((i) => i.status === "success");
     if (ok) sent++; else failed++;
     if (failed && !sent) throw new HttpError(400, `Telegram error: ${r[0]?.error}`);
@@ -833,6 +843,7 @@ export async function writeSettings(body: any) {
   clamp("website_max_age_hours", 1, 720);
   clamp("telegram_max_age_minutes", 1, 10080);
   clamp("max_posts_per_update", 1, 200);
+  clamp("converter_repeat_minutes", 0, 10080);
   await updateSettings(upd);
   return readSettings();
 }

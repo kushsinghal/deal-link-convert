@@ -449,7 +449,9 @@ export async function fetchWeb(url: string) {
 
 const SHORT_DOMAINS = ["visit.desidime.com", "fkrt.it", "fkrt.cc", "fkrt.co", "fkrt.site", "fkrt.", "fktr.in", "dl.flipkart.com/s/", "amzn.to", "amzn.in", "amzn.eu",
   "myntr.it", "ajiio.in", "bit.ly", "tinyurl.com", "ekaro.in", "linkredirect.in", "extp.in", "bitli.in",
-  "cutt.ly", "wishlink.com", "inr.deals", "clnk.in", "earnkaro.com", "t.co/", "rebrand.ly", "shrsl.com", "sankmo", "ddime.in", "fas.st", "s.click", "tiny.cc", "goo.gl", "amzn-to.co", "amznn.cc", "fkrt.to", "cuelinks.com", "/s/", "bitly", "shorturl", "redirect"];
+  "cutt.ly", "wishlink.com", "inr.deals", "clnk.in", "earnkaro.com", "t.co/", "rebrand.ly", "shrsl.com", "sankmo", "ddime.in", "fas.st", "s.click", "tiny.cc", "goo.gl", "amzn-to.co", "amznn.cc", "fkrt.to", "cuelinks.com", "/s/", "bitly", "shorturl", "redirect",
+  "rb.gy/", "is.gd/", "t.ly/", "ow.ly/", "lnkd.in/", "dub.sh/", "surl.li/", "indfs.in", "bitlli.in", "fkrtt.in", "link.amazon/", "linktr.ee", "affiliate-program.amazon"];
+const AFF_PREFIX = /^(?:utm_|af_|aff|sub_?id|irclickid|irgwc|cjevent|msclkid|dclid|is_retargeting|deep_link|source_caller|shortlink|atgsessionid|admitad|ranmid|raneaid|ransiteid)/;
 const WRAP_KEYS = ["dl", "url", "u", "link", "redirect", "redirect_url", "target", "r", "ulp"];
 const AFF_KEYS = new Set(["tag", "ascsubtag", "linkcode", "linkid", "creative", "creativeasin", "camp", "affid", "affextparam1",
   "affextparam2", "affextparam3", "cmpid", "ref", "ref_", "smid", "psc", "aff_id", "affiliate_id", "subid",
@@ -485,12 +487,23 @@ export function stripAffiliate(url: string) {
     const m = p.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})/);
     if (m) return `https://${p.hostname}/dp/${m[1]}`;
   }
-  let params = [...p.searchParams.entries()].filter(([k]) => !AFF_KEYS.has(k.toLowerCase()));
-  if (host.includes("flipkart.")) params = params.filter(([k]) => ["pid", "lid", "marketplace", "q", "otracker"].includes(k)).slice(0, 3).filter(([k]) => k !== "otracker");
+  const flipkart = host.includes("flipkart.");
+  if (host === "dl.flipkart.com" && !p.pathname.startsWith("/s/")) { p.host = "www.flipkart.com"; p.pathname = p.pathname.replace(/^\/dl\//, "/"); }
+  // App-install trackers (AppsFlyer) carry the other affiliate's id in pid / c.
+  const tracker = !flipkart && [...p.searchParams.keys()].some((k) => /^(?:af_|is_retargeting$)/i.test(k));
+  let params = [...p.searchParams.entries()].filter(([k]) => { const key = k.toLowerCase(); return !AFF_KEYS.has(key) && !AFF_PREFIX.test(key) && !(tracker && (key === "pid" || key === "c")); });
+  if (flipkart) params = params.filter(([k]) => ["pid", "lid", "marketplace", "q", "otracker"].includes(k)).slice(0, 3).filter(([k]) => k !== "otracker");
   return rebuild(p, params);
 }
 
-export const isShortLink = (url: string) => SHORT_DOMAINS.some((d) => url.toLowerCase().includes(d));
+/** An unknown shortener: short site name plus one code-like path piece (rb.gy/abc12, xyz.in/Ab3dE). */
+function looksShort(url: string) {
+  const p = tryUrl(url);
+  if (!p || p.search || detectStore(url) !== "Other") return false;
+  const code = p.pathname.match(/^\/([A-Za-z0-9_-]{5,14})\/?$/)?.[1];
+  return !!code && p.hostname.replace(/^www\./, "").length <= 10;
+}
+export const isShortLink = (url: string) => SHORT_DOMAINS.some((d) => url.toLowerCase().includes(d)) || looksShort(url);
 const needsResolve = (url: string) => SHORT_DOMAINS.some((d) => url.toLowerCase().includes(d)) || detectStore(url) === "Other";
 
 export async function resolveDealsmagnet(url: string): Promise<[string, string | null]> {

@@ -43,7 +43,7 @@ const DealRow = ({ d, reload }) => {
           <div className="flex gap-1"><dt className="font-semibold">Source posted:</dt><dd>{formatKolkata(CONVERTER_SOURCES.includes(d.source) ? null : d.posted_at)}</dd></div>
         </dl>
         <p data-testid={`admin-deal-link-${d.id}`} className={`break-all font-mono text-[11px] ${d.converted ? "text-emerald-700" : "text-amber-600"}`}>
-          {d.converted ? "Your affiliate link" : "Not converted"}: {d.affiliate_url}
+          {d.converted ? "Your affiliate link" : "Normal link (not converted)"}: {d.affiliate_url}
         </p>
         {(d.offers || []).length > 0 && (
           <p data-testid={`admin-deal-offers-${d.id}`} className="truncate text-[11px] text-slate-600">
