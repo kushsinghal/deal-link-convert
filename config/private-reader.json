@@ -1,0 +1,6 @@
+{
+  "sources": ["hotdealsbywd", "tapworthy", "Flipkart_scdeals_PranayCC"],
+  "destinations": ["https://t.me/dealfetch", "https://t.me/Deltfetch"],
+  "caption_position": "top",
+  "caption": ""
+}

@@ -203,3 +203,12 @@
 - Not built (owner's decision): Phase 2 "post once, bot publishes"; posting full links instead of short links. Phase 3 (hosting/region/fastest mode) waits for measured numbers.
 - affiliate.server split into cleanAffiliate / finishAffiliate / findLinks / renderConverted (convertAffiliate and convertAffiliateText keep their behaviour).
 - Verified: tsc clean, vitest 151/151 (temporary backend/.env), real local Mongo run of memory/claims/settings invalidation, production build OK, UI smoke test. NOT verified: real Telegram, Render, actual speed gain (no live numbers yet).
+
+## 2026-06 — Private Channel Reader (planning, NOT built yet)
+- Settings file: `config/private-reader.json` (tracked in Git): sources hotdealsbywd, tapworthy, Flipkart_scdeals_PranayCC; destinations https://t.me/dealfetch, https://t.me/Deltfetch; caption_position "top"; caption empty (user will send tomorrow).
+- Spare-account TELEGRAM_API_ID / TELEGRAM_API_HASH requested via secure card -> backend/.env (gitignored, not pushed). On Render they must be added in service Environment (render.yaml already lists both, sync:false).
+- OTP is never stored. Existing gramjs login (sankmo-bot.server.ts, admin phone+code) saves encrypted session in Mongo settings.tg_session — survives redeploys; must log in on the LIVE site (live Mongo differs from preview DB).
+- User will upload their existing local script tomorrow for reference before building. Render free tier sleeps -> always-on plan needed for reader.
+- 2026-06: TELEGRAM_API_ID + TELEGRAM_API_HASH saved via secure card (platform-injected env, both formats valid). Admin /sankmo-bot/status -> credentials_ready true, connected false (no OTP login done yet).
+- Fork again lacked backend/.env + frontend/.env (frontend FATAL "MONGO_URL is not set"). Recreated: MONGO_URL, DB_NAME=dealloot_preview, NODE_INTERNAL_URL, ADMIN_PASSWORD (test_credentials.md), generated SESSION_SECRET + WEBHOOK_CRON_SECRET, CORS_ORIGINS; frontend REACT_APP_BACKEND_URL. Preview back up (stats 200).
+- Next: user uploads their existing local script, sends caption text; then build reader.
