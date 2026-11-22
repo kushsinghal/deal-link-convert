@@ -29,7 +29,8 @@ export function validPairing(code: string, token: string) {
   return !!match?.[1] && !!match?.[2] && Number(match[1]) > Date.now() && equal(match[2], sign(`telegram-pair:${token}:${match[1]}`));
 }
 
-export async function telegramCall(token: string, method: string, body: Record<string, unknown>) {
+/** attempts: 1 for new posts, where a timed-out send may already have arrived and a retry would post twice. */
+export async function telegramCall(token: string, method: string, body: Record<string, unknown>, attempts = 3) {
   tokenSchema.parse(token);
   let response: Response | undefined;
   for (let attempt = 0; !response; attempt++) {
@@ -37,7 +38,7 @@ export async function telegramCall(token: string, method: string, body: Record<s
       response = await fetch(`https://api.telegram.org/bot${token}/${method}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(12_000) });
     } catch (e: any) {
       console.error("Telegram network error", method, attempt, e?.cause?.code || e?.name || "unknown");
-      if (attempt >= 2) throw new Error("Telegram could not be reached. Try again.");
+      if (attempt >= attempts - 1) throw new Error("Telegram could not be reached. Try again.");
       await new Promise((r) => setTimeout(r, 600));
     }
   }
