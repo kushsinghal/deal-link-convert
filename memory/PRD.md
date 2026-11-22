@@ -212,3 +212,9 @@
 - 2026-06: TELEGRAM_API_ID + TELEGRAM_API_HASH saved via secure card (platform-injected env, both formats valid). Admin /sankmo-bot/status -> credentials_ready true, connected false (no OTP login done yet).
 - Fork again lacked backend/.env + frontend/.env (frontend FATAL "MONGO_URL is not set"). Recreated: MONGO_URL, DB_NAME=dealloot_preview, NODE_INTERNAL_URL, ADMIN_PASSWORD (test_credentials.md), generated SESSION_SECRET + WEBHOOK_CRON_SECRET, CORS_ORIGINS; frontend REACT_APP_BACKEND_URL. Preview back up (stats 200).
 - Next: user uploads their existing local script, sends caption text; then build reader.
+
+## 2026-06 — Private Channel Reader: analysis only (no code changed)
+- Public preview: Flipkart_scdeals_PranayCC readable (full flipkart.com URL with PID, MRP/Discounted/SuperCoins/Seller lines, later edited with "OOS · blinked N sec"). hotdealsbywd, tapworthy, Deltfetch: web preview disabled (need user-account session, which lives only in the Render Mongo).
+- @dealfetch currently shows TWO formats and duplicates (same fkrt.co/XxLZMb posted twice): old Python "Supercoin Deals" caption + raw source-style copies.
+- Old Python script logs (zip): Telegram->listener median 2.0s (p90 6.6s, 1-second source timestamps); source->posted median ~5s (p90 ~9s); Sankmo reply 0.3–1.1s (max 33s); http_resolve fkrt.site 0.7–1.0s; Deltfetch required price >4500; dedup 300s; no photos.
+- Proposed plan sent to user; awaiting approval before building. Key risk: sankmo-bot client and reader must share ONE gramjs client (same session) — no 2-min idle close.
