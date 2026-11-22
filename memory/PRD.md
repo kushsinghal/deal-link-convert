@@ -226,3 +226,13 @@
 - Code: src/server/private-reader.server.ts (ensureReader on every API request/cron ping, shared gramjs client via sankmo-bot getClient + holdClient (no idle close), auto-join sources, NewMessage live + 8s safety poll, reader_seen dedupe (TTL 1d), reader_cursor per source, retry up to 2x on temporary failure, per-destination isolation, claimProducts per bot:destChatId:productKey (shared with converter), Bot API getMe warm-up, sendMessage single attempt, optional photo). src/server/private-reader-format.ts (parseDeal/buildPost/messageLinks). Settings reader_enabled/caption/sources/destinations(min_price; Deltfetch 4500)/post_bot/photo; GET /api/public/reader/status; admin tab "Channel Reader" (ReaderTab.tsx). Logs to converter_logs (source:"reader").
 - Tests: vitest 166/166 (format on real samples + mocked pipeline), tsc clean. Live preview: connected + joined 3 sources. testing agent iteration_1: fixed 004/006/007/014; other findings left (see summary).
 - Next: push to GitHub, redeploy Render, log in in Affiliate Setup on live (spare account), make the posting bot admin in both channels, switch reader on, STOP the old local script.
+
+## 2026-06 — Reader speed round (user: post from SPARE ACCOUNT, posting bot @xtelgobot, spare account now admin of both channels)
+- reader_post_bot default "account": posts via the already-open gramjs connection (accountPoster); bot mode still available (botPoster, single-attempt sendMessage, getMe warm-up).
+- Repeat check runs in parallel with conversion (claims ∥ recall+convert). hedgedConvert: ExtraPe first, Sankmo asked after 0.9s if no answer, first working link wins. ExtraPe connection warmed (HEAD) while short link opens. Optional reader_try_short (test switch, default off): converts the source short link directly in parallel.
+- Sankmo bot reply detected by live NewMessage event (1.5s poll backup), ignores replies to other requests (replyTo check).
+- Converter webhook ignores channel posts whose links were all just posted by the reader (markReaderPost, in-memory, 10 min) — prevents @earnadobot deleting our post as a repeat.
+- Each channel gets only products new there. Timeouts with unknown outcome are not retried (no double posts). Unreachable destination -> retry later; others already posted count as repeats.
+- Destinations now get an id on create (+ legacy repair on list) — fixes "can't select/test new bot".
+- Status last_sent: delivery / opening link / convert+repeat / posting / our part (processing_ms).
+- vitest 168/168, tsc clean. Testing iteration_2: fixed 014, 066, 070, 073 (+011, 024). NOT verified live: account posting, real timings, ExtraPe accepting fkrt.co directly.

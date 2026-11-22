@@ -182,6 +182,9 @@ async function convertOnce(url: string) {
     if (done || !m || m.out) return;
     if (!sentId) { early.push(m); return; }
     if (m.id <= sentId) return;
+    // A late answer to an earlier link replies to that link's message; it must not be taken for this one.
+    const replyTo = m.replyTo?.replyToMsgId;
+    if (replyTo && replyTo !== sentId) return;
     lastText = String(m.message || "").slice(0, 160);
     const link = replyLinks(m).find((u) => u !== url && !/t\.me\/|telegram\.me/i.test(u));
     if (link) { done = true; resolveLink(link); }

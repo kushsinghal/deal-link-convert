@@ -156,7 +156,7 @@ function accountPoster(settings: any): Poster {
       const run = photo
         ? import("telegram/client/uploads").then(({ CustomFile }) => attached.sendFile(entity, { file: new CustomFile("deal.jpg", photo.length, "", photo), caption: text }))
         : attached.sendMessage(entity, { message: text, linkPreview: true });
-      return Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(new Error("Telegram did not confirm the post within 10 s")), 10_000))]);
+      return Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(Object.assign(new Error("Telegram did not confirm the post within 10 s"), { unknown: true })), 10_000))]);
     },
     warm() {},
   };
@@ -275,7 +275,8 @@ async function handle(src: Source, m: any, via: string, receivedAt: number, mess
   const repeatMs = Math.max(5, Number(settings.converter_repeat_minutes) || 5) * 60_000;
   const keyOf = (id: string, p: any) => `${poster.prefix}:${id}:${productKey(p.cleaned)}`;
   const askStart = Date.now();
-  const claimsP = destIdsReady.then((all) => Promise.all(all.filter((x): x is { d: any; id: string } => !!x).map(async ({ d, id }) => {
+  let unreachable = false;
+  const claimsP = destIdsReady.then((all) => { unreachable = all.some((x) => !x); return all; }).then((all) => Promise.all(all.filter((x): x is { d: any; id: string } => !!x).map(async ({ d, id }) => {
     const fresh = await conv.claimProducts(db, [...new Set(products.map((p) => keyOf(id, p)))], repeatMs);
     return { d, id, fresh };
   })));
@@ -314,17 +315,23 @@ async function handle(src: Source, m: any, via: string, receivedAt: number, mess
   const sendStart = Date.now();
   const sent = await Promise.all(wanted.map(async (c) => {
     const post = buildPost(deal, c.items.map((i) => ({ store: i.store, url: i.converted })), settings.reader_caption || "");
-    try { await poster.send(c.id, post, photo); return { c, ok: true, at: Date.now() }; } catch (e: any) { return { c, ok: false, error: String(e?.errorMessage || e?.message || e).slice(0, 300), at: Date.now() }; }
+    try { await poster.send(c.id, post, photo); return { c, ok: true, at: Date.now() }; } catch (e: any) {
+      const msg = String(e?.errorMessage || e?.message || e).slice(0, 300);
+      // A timed-out send may still have arrived: it is not repeated, so followers never get the deal twice.
+      return { c, ok: false, unknown: !!e?.unknown || /could not be reached|timed? ?out|abort/i.test(msg), error: msg, at: Date.now() };
+    }
   }));
   const failedSends = sent.filter((x) => !x.ok);
-  await conv.releaseProducts(db, [...lost, ...failedSends.flatMap((x) => x.c.fresh)]);
+  const retryable = failedSends.filter((x) => !(x as any).unknown);
+  await conv.releaseProducts(db, [...lost, ...retryable.flatMap((x) => x.c.fresh)]);
   const firstOk = sent.find((x) => x.ok);
-  if (firstOk) state.last_sent = { at: new Date(firstOk.at).toISOString(), source: src.name, to: sent.filter((x) => x.ok).map((x) => botChat(x.c.d.chat)), total_ms: firstOk.at - messageAt, title: deal.title, by: poster.prefix === "acct" || settings.reader_post_bot === "account" ? "spare account" : "bot" };
+  if (firstOk) state.last_sent = { at: new Date(firstOk.at).toISOString(), source: src.name, to: sent.filter((x) => x.ok).map((x) => botChat(x.c.d.chat)), total_ms: firstOk.at - messageAt, title: deal.title, processing_ms: firstOk.at - receivedAt, delivery_ms: Math.max(0, receivedAt - messageAt), open_ms: openMs, convert_ms: serviceMs, send_ms: firstOk.at - sendStart, by: settings.reader_post_bot === "account" || !settings.reader_post_bot ? "spare account" : "bot" };
   if (failedSends.length) fail("send", failedSends[0]?.error);
   await log(sent.flatMap((x) => x.c.items.map((i: any) => ({
     chat_id: x.c.id, chat_title: `Reader: ${src.name} → ${botChat(x.c.d.chat)}`, service: i.service || null, reused: !!i.reused, store: i.store, original: i.original, cleaned: i.cleaned,
     converted: i.converted, status: x.ok ? "converted" : "failed", error: x.ok ? null : `Post not sent: ${x.error}`, service_ms: i.reused ? 0 : serviceMs, telegram_ms: x.at - sendStart, replied_at: new Date(x.at).toISOString(), total_ms: x.at - messageAt,
   }))));
   // Channels that already got the post count as repeats on the retry, so only the failed channel is tried again.
-  if (failedSends.length) throw new Retry(failedSends[0]?.error || "send failed");
+  if (retryable.length) throw new Retry(retryable[0]?.error || "send failed");
+  if (unreachable) throw new Retry("A destination channel could not be reached");
 }
