@@ -2,8 +2,8 @@ import crypto, { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { mongo } from "./db.server";
 import { getSettings, publishConversion } from "./core.server";
-import { convertAffiliateText } from "./affiliate.server";
-import { productKey } from "./engine.server";
+import { cleanAffiliate, finishAffiliate, findLinks, renderConverted, socialLink } from "./affiliate.server";
+import { productKey, isShortLink, isDealSite, detectStore } from "./engine.server";
 import { BOT_COMMANDS, BOT_HELP } from "../lib/bot-commands";
 
 const tokenSchema = z.string().regex(/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/, "Enter the bot token from BotFather");
@@ -155,6 +155,7 @@ export async function connectConverter(origin: string) {
   await telegramCall(token, "setWebhook", { url: `${url.origin}/api/public/telegram/converter`, secret_token: webhookSecret(token), allowed_updates: ["message", "channel_post"], drop_pending_updates: false });
   const db = await mongo();
   await db.collection("settings").updateOne({ id: "main" }, { $set: { telegram_converter_username: bot.username, telegram_converter_url: url.origin, telegram_converter_connected: true } });
+  settingsCache = null;
   await syncBotMenu();
   await notifyOwner("✅ Connected. The converter bot is running — send your links here.");
   return { username: bot.username, pairing_code: pairingCode(token), webhook_url: `${url.origin}/api/public/telegram/converter` };
@@ -178,28 +179,114 @@ export async function disconnectConverter() {
   }
   const db = await mongo();
   await db.collection("settings").updateOne({ id: "main" }, { $set: { telegram_converter_connected: false } });
+  settingsCache = null;
   return { connected: false };
+}
+
+const DAY = 86400_000;
+const LOCK_MS = 300_000;
+// Render runs one copy of the site, so answers kept in memory save a database trip. The database stays the source of truth.
+const local = new Map<string, { v: any; exp: number }>();
+const localClaims = new Map<string, number>();
+const connectedLocal = new Set<string>();
+let settingsCache: { at: number; value: any } | null = null;
+let indexed = false;
+
+export function resetConverterCaches() { local.clear(); localClaims.clear(); connectedLocal.clear(); settingsCache = null; }
+
+export const ROUTE_KEYS = ["converter_bot_service", "converter_order", "affiliate_routes", "affiliate_chains", "amazon_route", "amazon_tag", "extrape_token", "earnkaro_token", "sankmo_token", "sankmo_api_url", "convert_mode", "convert_enabled", "tg_session"];
+/** Called after settings are saved: the bot reads them again, and remembered links are dropped when the converter setup changed. */
+export async function settingsChanged(changed: string[]) {
+  settingsCache = null;
+  if (!changed.some((k) => ROUTE_KEYS.includes(k))) return;
+  for (const k of local.keys()) if (k.startsWith("c:")) local.delete(k);
+  await (await mongo()).collection("converter_memory").deleteMany({ _id: { $regex: "^c:" } as any });
+}
+
+async function botSettings() {
+  if (!settingsCache || Date.now() - settingsCache.at > 60_000) settingsCache = { at: Date.now(), value: await getSettings() };
+  return settingsCache.value;
+}
+
+function keep(id: string, v: any, exp: number) {
+  if (local.size >= 5000) for (const k of [...local.keys()].slice(0, 1000)) local.delete(k);
+  local.set(id, { v, exp });
+}
+/** Remembered answers: "s:" opened short link, "o:" link the bot made, "c:" affiliate link of a product listing. */
+async function recall(db: any, ids: string[]) {
+  const out = new Map<string, any>(), now = Date.now();
+  const miss = ids.filter((id) => { const hit = local.get(id); if (hit && hit.exp > now) out.set(id, hit.v); return !out.has(id); });
+  if (miss.length) for (const row of await db.collection("converter_memory").find({ _id: { $in: miss }, exp: { $gt: new Date(now) } }).toArray()) { out.set(row._id, row.v); keep(row._id, row.v, +new Date(row.exp)); }
+  return out;
+}
+async function remember(db: any, entries: [string, any, number][]) {
+  if (!entries.length) return;
+  const now = Date.now();
+  for (const [id, v, ttl] of entries) keep(id, v, now + ttl);
+  await db.collection("converter_memory").bulkWrite(entries.map(([id, v, ttl]) => ({ updateOne: { filter: { _id: id }, update: { $set: { v, exp: new Date(now + ttl) } }, upsert: true } })), { ordered: false });
+}
+/** Same seller listing of the same product; other shops are matched by the exact clean link. */
+export function reuseKey(cleaned: string) {
+  let p: URL | null = null;
+  try { p = new URL(cleaned); } catch { /* not a URL */ }
+  if (p?.hostname.includes("flipkart.")) {
+    const lid = p.searchParams.get("lid") || "";
+    const pid = p.searchParams.get("pid") || lid.match(/^LST([A-Z0-9]{16})/)?.[1];
+    if (pid) return `c:flipkart:${pid}:${lid}`;
+  }
+  return `c:${cleaned}`;
 }
 
 /** Marks products as posted in one chat; returns the keys that were not posted there inside the window. */
 async function claimProducts(db: any, keys: string[], windowMs: number) {
-  const col = db.collection("converter_products");
   const at = Date.now();
+  // Every product was seen here moments ago by this server: a repeat, no database trip needed.
+  if (keys.length && keys.every((k) => (localClaims.get(k) ?? 0) > at - windowMs)) return [];
+  const col = db.collection("converter_products");
   const got = await Promise.all(keys.map(async (key) => {
     try { await col.updateOne({ _id: key, at: { $lte: at - windowMs } }, { $set: { at } }, { upsert: true }); return key; } catch (e: any) {
       if (e?.code === 11000) return null;
       throw e;
     }
   }));
-  return got.filter((k): k is string => !!k);
+  const fresh = got.filter((k): k is string => !!k);
+  if (localClaims.size >= 5000) localClaims.clear();
+  for (const k of fresh) localClaims.set(k, at);
+  return fresh;
+}
+async function releaseProducts(db: any, keys: string[]) {
+  if (!keys.length) return;
+  for (const k of keys) localClaims.delete(k);
+  await db.collection("converter_products").deleteMany({ _id: { $in: keys } as any }).catch(() => {});
 }
 
-let indexed = false;
+/** One update is handled once, even if Telegram sends it again. */
+async function takeUpdate(updates: any, key: string): Promise<"go" | "done" | "busy"> {
+  try { await updates.insertOne({ _id: key, locked_until: Date.now() + LOCK_MS }); return "go"; } catch (e: any) {
+    if (e?.code !== 11000) throw e;
+  }
+  const existing = await updates.findOne({ _id: key });
+  if (existing?.done) return "done";
+  const claim = await updates.updateOne({ _id: key, done: { $ne: true }, locked_until: { $lte: Date.now() } }, { $set: { locked_until: Date.now() + LOCK_MS } });
+  return claim.modifiedCount ? "go" : "busy";
+}
+
+const GONE = /message to edit not found|MESSAGE_ID_INVALID/i;
+// A deleted post is only posted again while the deal is fresh; old updates delivered after an outage are not.
+const POST_AGAIN_MS = 10 * 60_000;
+/** The post was deleted before the bot could change it: the converted message goes out as a new post. */
+async function postAgain(token: string, msg: any, message: string, entities: unknown[]) {
+  const media: [string, string, string] | null = msg.photo?.length ? ["sendPhoto", "photo", msg.photo.at(-1).file_id] : msg.video ? ["sendVideo", "video", msg.video.file_id]
+    : msg.animation ? ["sendAnimation", "animation", msg.animation.file_id] : msg.document ? ["sendDocument", "document", msg.document.file_id] : null;
+  if (media && msg.text === undefined) return telegramCall(token, media[0], { chat_id: msg.chat.id, [media[1]]: media[2], caption: message, caption_entities: entities });
+  return telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: message, entities });
+}
+
 /** Lets tests wait for the post-reply work. */
 export let lastBackground: Promise<void> = Promise.resolve();
 
 export async function receiveConverter(request: Request, body: unknown) {
-  const settings = await getSettings();
+  const settings = await botSettings();
   const token = settings.telegram_converter_token;
   if (!token || !equal(request.headers.get("x-telegram-bot-api-secret-token") || "", webhookSecret(token))) return Response.json({ detail: "Unauthorized" }, { status: 401 });
   const parsed = updateSchema.safeParse(body);
@@ -208,12 +295,14 @@ export async function receiveConverter(request: Request, body: unknown) {
   const msg = update.message || update.channel_post;
   // Anonymous group admins and "post as channel" arrive under a Telegram service bot name; they are real people.
   if (!msg || (msg.from?.is_bot && !(msg as any).sender_chat)) return Response.json({ ok: true });
+  const receivedAt = Date.now();
   const text = msg.text ?? msg.caption ?? "";
   const bot = token.split(":")[0];
   const db = await mongo();
   const chats = db.collection("telegram_converter_chats");
   const chatKey = `${bot}:${msg.chat.id}`;
-  const connected = !!await chats.findOne({ _id: chatKey as any }, { projection: { _id: 1 } });
+  const connected = connectedLocal.has(chatKey) || !!await chats.findOne({ _id: chatKey as any }, { projection: { _id: 1 } });
+  if (connected) connectedLocal.add(chatKey);
   if (/^\/(?:menu|help|start)(?:@\w+)?$/i.test(text.trim()) && msg.chat.type !== "channel") return Response.json({ method: "sendMessage", chat_id: msg.chat.id, text: BOT_HELP });
   if (/^\/tweets(?:@\w+)?(?:\s|$)/i.test(text.trim()) && msg.chat.type !== "channel") {
     const { startTweetCommand } = await import("./tweet-command.server");
@@ -224,6 +313,7 @@ export async function receiveConverter(request: Request, body: unknown) {
   const pair = text.match(/^\/(?:start|connect)(?:@\w+)?\s+(\S+)$/);
   if (RADHE.test(text.trim()) || (pair?.[1] && validPairing(pair[1], token))) {
     await chats.updateOne({ _id: chatKey as any }, { $set: { bot, chat_id: String(msg.chat.id), type: msg.chat.type, title: chatName(msg.chat), connected_at: new Date().toISOString() } }, { upsert: true });
+    connectedLocal.add(chatKey);
     if (msg.chat.type !== "channel") await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "✅ Connected. Radhe Radhe! Send your links or deal text here and I'll reply with your affiliate links." }).catch((e) => console.error("connect reply failed", e.message));
     return Response.json({ ok: true });
   }
@@ -237,59 +327,105 @@ export async function receiveConverter(request: Request, body: unknown) {
   const style = text.trim().match(STYLE);
   if (style && msg.chat.type === "private") {
     const want = ({ label: "store", store: "store", name: "store", link: "link", url: "link", https: "link" } as Record<string, string>)[(style[1] || "").toLowerCase()];
-    if (want) await db.collection("settings").updateOne({ id: "main" }, { $set: { converter_label_style: want } });
+    if (want) { await db.collection("settings").updateOne({ id: "main" }, { $set: { converter_label_style: want } }); settingsCache = null; }
     const now = want || settings.converter_label_style || "store";
     return Response.json({ method: "sendMessage", chat_id: msg.chat.id, text: `${want ? "✅ Saved. " : ""}Converted links are shown as ${now === "link" ? "the plain link (https://fkrt.co/...)" : "the store name (@Flipkart)"}.\n\nTo change: /style label  or  /style link` });
   }
+
   const updates = db.collection("telegram_converter_updates");
+  const logs = db.collection("converter_logs");
   const key = `${bot}:${update.update_id}`;
-  const existing = await updates.findOne({ _id: key });
-  if (existing?.done) return Response.json({ ok: true });
-  if (existing?.locked_until > Date.now()) return Response.json({ detail: "Processing" }, { status: 503 });
-  try {
-    if (!existing) await updates.insertOne({ _id: key, locked_until: Date.now() + 300_000 });
-    else {
-      const claim = await updates.updateOne({ _id: key, done: { $ne: true }, locked_until: { $lte: Date.now() } }, { $set: { locked_until: Date.now() + 300_000 } });
-      if (!claim.modifiedCount) return Response.json({ detail: "Processing" }, { status: 503 });
-    }
-  } catch (error: any) {
-    if (error?.code === 11000) return Response.json({ detail: "Processing" }, { status: 503 });
-    throw error;
-  }
-  const receivedAt = Date.now();
   const messageAt = typeof (msg as any).date === "number" ? (msg as any).date * 1000 : receivedAt;
+  const direct = msg.chat.type !== "channel";
+  const entities = msg.entities || msg.caption_entities || [];
+  const base = () => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, chat_title: chatName(msg.chat), message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(),
+    replied_at: new Date().toISOString(), deliver_ms: Math.max(0, receivedAt - messageAt), convert_ms: Date.now() - receivedAt, total_ms: Math.max(0, Date.now() - messageAt) });
+  const finish = () => updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } }).catch(() => {});
   let claimed: string[] = [];
+  // Step 1: the update lock and the link clean-up run side by side; nothing is changed anywhere yet.
+  const lock = takeUpdate(updates, key);
+  lock.catch(() => {});
   try {
-    const service = settings.converter_bot_service;
-    const logs = db.collection("converter_logs");
-    const known = (url: string) => logs.findOne({ converted: url, status: "converted" }, { projection: { _id: 0, cleaned: 1 } });
-    const result = await convertAffiliateText(text, service && service !== "auto" ? { ...settings, force_service: service } : settings, msg.entities || msg.caption_entities || [], known);
-    const failed = result.items.filter((i) => i.error);
-    const changed = result.items.some((i) => i.changed && !i.error);
-    const own = result.items.some((i: any) => i.own || i.keep_clean);
-    const direct = msg.chat.type !== "channel";
-    // Same product again in the same channel or group: one database check, done after the links are cleaned.
+    const found = findLinks(text, entities);
+    const lookups = found.urls.filter((u) => !socialLink(u) && (isShortLink(u) || detectStore(u) === "Other"));
+    const [memo, older] = await Promise.all([
+      recall(db, lookups.flatMap((u) => [`o:${u}`, `s:${u}`])),
+      lookups.some((u) => !local.has(`o:${u}`) && !local.has(`s:${u}`)) ? logs.find({ converted: { $in: lookups }, status: "converted" }, { projection: { _id: 0, converted: 1, cleaned: 1 } }).limit(20).toArray().catch(() => []) : [],
+    ]);
+    const openStart = Date.now();
+    let opened = false;
+    const steps: any[] = await Promise.all(found.urls.map((url) => {
+      const social = socialLink(url);
+      if (social) return social;
+      const own = memo.get(`o:${url}`) || (older as any[]).find((r) => r.converted === url)?.cleaned;
+      const seen = memo.get(`s:${url}`);
+      if (!own && !seen && lookups.includes(url)) opened = true;
+      return cleanAffiliate(url, settings, true, own ? async () => ({ cleaned: own }) : undefined, seen);
+    }));
+    const openMs = opened ? Date.now() - openStart : 0;
+    const state = await lock;
+    if (state === "done") return Response.json({ ok: true });
+    if (state === "busy") return Response.json({ detail: "Processing" }, { status: 503 });
+
+    // Step 2: same product again in the same channel or group? Checked before the converter is asked.
     const repeatMinutes = msg.chat.type === "private" ? 0 : Math.max(0, Number(settings.converter_repeat_minutes ?? 5) || 0);
-    if (repeatMinutes && (changed || own)) {
-      const keys = [...new Set(result.items.filter((i: any) => !i.error && i.store !== "Other").map((i: any) => `${chatKey}:${productKey(i.cleaned)}`))];
-      claimed = await claimProducts(db, keys, repeatMinutes * 60_000);
-      // In a channel the repeat post is deleted; without delete rights it is converted as usual.
-      if (keys.length && !claimed.length && (direct || await telegramCall(token, "deleteMessage", { chat_id: msg.chat.id, message_id: msg.message_id }).then(() => true, () => false))) {
-        await updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } });
-        const at = new Date().toISOString();
-        lastBackground = db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, chat_title: chatName(msg.chat), service: i.service || null, own: !!i.own, store: i.store, original: i.original, cleaned: i.cleaned, converted: null,
-          status: "repeat", error: `Same product was already posted in this chat in the last ${repeatMinutes} min`, message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: at, convert_ms: Date.now() - receivedAt, total_ms: Math.max(0, Date.now() - messageAt) }))).then(() => {}, (e: any) => console.error("repeat log failed", e?.message));
-        return Response.json({ ok: true });
-      }
+    const productOf = (i: any) => `${chatKey}:${productKey(i.cleaned)}`;
+    const products = steps.filter((i) => !i.error && !i.unsupported && i.store !== "Other");
+    const keys = repeatMinutes ? [...new Set(products.map(productOf))] : [];
+    const pending = steps.filter((i) => i.pending);
+    const [fresh, links] = await Promise.all([keys.length ? claimProducts(db, keys, repeatMinutes * 60_000) : [], recall(db, pending.map((i) => reuseKey(i.cleaned)))]);
+    claimed = fresh;
+    if (keys.length && !fresh.length) {
+      const row = base();
+      lastBackground = Promise.all([finish(), logs.insertMany(steps.map((i) => ({ ...row, id: crypto.randomUUID(), service: null, own: !!i.own, store: i.store, original: i.original, cleaned: i.cleaned, converted: null,
+        status: "repeat", error: `Same product was already posted in this chat in the last ${repeatMinutes} min`, open_ms: openMs })))]).then(() => {}, (e: any) => console.error("repeat log failed", e?.message));
+      // The delete order rides back on this answer: no second trip to Telegram, and Telegram sends no result.
+      return Response.json(direct ? { ok: true } : { method: "deleteMessage", chat_id: msg.chat.id, message_id: msg.message_id });
     }
+
+    // Step 3: affiliate links. A listing converted in the last 24 hours reuses its link; the rest go to the converter.
+    const service = settings.converter_bot_service;
+    const use = service && service !== "auto" ? { ...settings, force_service: service } : settings;
+    const askStart = Date.now();
+    let asked = false;
+    const items: any[] = await Promise.all(steps.map((i) => {
+      if (!i.pending) return i;
+      const hit = links.get(reuseKey(i.cleaned));
+      if (hit?.converted) return { original: i.original, cleaned: i.cleaned, converted: hit.converted, changed: true, error: null, store: i.store, service: hit.service, reused: true };
+      asked = true;
+      return finishAffiliate(i, use).then((r) => ({ ...r, asked: true }));
+    }));
+    const serviceMs = asked ? Date.now() - askStart : 0;
+    const result = renderConverted(text, entities, found.spans, items, settings);
+    const failed = items.filter((i) => i.error);
+    const changed = items.some((i) => i.changed && !i.error);
+    const own = items.some((i) => i.own || i.keep_clean);
+    // A product that was not converted does not count as posted.
+    const good = new Set(items.filter((i) => !i.error && (i.changed || i.own || i.keep_clean)).map(productOf));
+    const lost = claimed.filter((k) => !good.has(k));
+    claimed = claimed.filter((k) => good.has(k));
+    void releaseProducts(db, lost);
+
     // Convert what can be converted and remove every other link; normal text stays exactly as sent.
     let reply: Record<string, unknown> | null = null;
-    if (!result.items.length) reply = null;
+    let telegramMs = 0, posted = false;
+    if (!items.length) reply = null;
     else if (changed || own) {
       if (!direct) {
-        if (result.message !== text || JSON.stringify(result.entities) !== JSON.stringify(msg.entities || msg.caption_entities || [])) {
-          await telegramCall(token, msg.text !== undefined ? "editMessageText" : "editMessageCaption", { chat_id: msg.chat.id, message_id: msg.message_id,
-            ...(msg.text !== undefined ? { text: result.message, entities: result.entities } : { caption: result.message, caption_entities: result.entities }) });
+        if (result.message !== text || JSON.stringify(result.entities) !== JSON.stringify(entities)) {
+          const editStart = Date.now();
+          try {
+            await telegramCall(token, msg.text !== undefined ? "editMessageText" : "editMessageCaption", { chat_id: msg.chat.id, message_id: msg.message_id,
+              ...(msg.text !== undefined ? { text: result.message, entities: result.entities } : { caption: result.message, caption_entities: result.entities }) });
+          } catch (e: any) {
+            const why = String(e?.message || "");
+            if (/message is not modified/i.test(why)) { /* already shows this text */ }
+            else if (GONE.test(why) && Date.now() - messageAt <= POST_AGAIN_MS) {
+              await postAgain(token, msg, result.message, result.entities);
+              posted = true;
+            } else throw e;
+          }
+          telegramMs = Date.now() - editStart;
         }
       } else {
         if (result.message.length > 4096) throw new Error("Converted message is too long for Telegram; send fewer links in one message");
@@ -298,38 +434,43 @@ export async function receiveConverter(request: Request, body: unknown) {
     } else if (!direct) { if (failed.length) console.error("Telegram channel conversion failed; original post kept", failed.map((i) => i.error)); }
     else if (failed.length) reply = { chat_id: msg.chat.id, text: `Conversion failed: ${[...new Set(failed.map((i) => i.error))].join("; ").slice(0, 3500)}` };
     else reply = { chat_id: msg.chat.id, text: "No shop link that can be converted was found in this message.", reply_parameters: { message_id: msg.message_id } };
-    const repliedAt = Date.now();
-    await updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } });
+    const row = base();
     // The reply is already sent; saving the deal (slow product lookup) and logging must not delay it.
     lastBackground = (async () => {
-      if (!result.items.length) return;
+      await finish();
+      if (!items.length) return;
       if (direct && changed && failed.length) await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: `${failed.length} link(s) could not be converted and were removed: ${[...new Set(failed.map((i) => i.error))].join("; ").slice(0, 3000)}` }).catch(() => {});
-      await db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, chat_title: chatName(msg.chat), service: i.service || null, own: !!i.own, store: i.store, original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted,
-        status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error || (!i.changed && !i.own ? "Not a convertible shop link; removed" : null), message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: new Date(repliedAt).toISOString(),
-        convert_ms: repliedAt - receivedAt, total_ms: Math.max(0, repliedAt - messageAt) })));
-      if (claimed.length) await db.collection("converter_products").deleteMany({ at: { $lt: Date.now() - 8 * 86400_000 } }).catch(() => {});
+      await logs.insertMany(items.map((i) => ({ ...row, id: crypto.randomUUID(), service: i.service || null, own: !!i.own, reused: !!i.reused, reposted: posted, store: i.store, original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted,
+        status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error || (!i.changed && !i.own ? "Not a convertible shop link; removed" : null), open_ms: openMs, service_ms: i.asked ? serviceMs : 0, telegram_ms: telegramMs })));
+      const made = items.filter((i) => i.changed && !i.error && !i.reused);
+      await remember(db, [
+        ...made.flatMap((i): [string, any, number][] => [[reuseKey(i.cleaned), { converted: i.converted, service: i.service || null }, DAY], [`o:${i.converted}`, i.cleaned, 30 * DAY]]),
+        ...steps.filter((i) => i.pending && i.cleaned !== i.original && lookups.includes(i.original) && !memo.has(`s:${i.original}`) && !isShortLink(i.cleaned) && !isDealSite(i.cleaned)).map((i): [string, any, number] => [`s:${i.original}`, i.cleaned, DAY]),
+      ]).catch((e: any) => console.error("link memory failed", e?.message));
       await chats.updateOne({ _id: chatKey as any, title: { $ne: chatName(msg.chat) } }, { $set: { title: chatName(msg.chat) } }).catch(() => {});
-      if (!indexed) { indexed = true; await logs.createIndex({ converted: 1 }).catch(() => {}); }
-      for (const i of result.items) await alertIfKeyFailed(i.error);
-      for (const item of result.items) {
-        if (item.error || !item.changed) continue;
+      if (!indexed) {
+        indexed = true;
+        await logs.createIndex({ converted: 1 }).catch(() => {});
+        await db.collection("converter_memory").createIndex({ exp: 1 }, { expireAfterSeconds: 0 }).catch(() => {});
+        await db.collection("converter_products").deleteMany({ at: { $lt: Date.now() - 8 * DAY } }).catch(() => {});
+      }
+      for (const i of items) await alertIfKeyFailed(i.error);
+      for (const item of items) {
+        if (item.error || !item.changed || item.reused) continue;
         await publishConversion({ original: item.original, cleaned: item.cleaned, converted: item.converted, error: null, text, settings, source: "Telegram converter" });
       }
     })().catch((e) => console.error("converter background work failed", e?.message));
     // Answering inside the webhook response saves a separate round trip to Telegram.
     return Response.json(reply ? { method: "sendMessage", ...reply } : { ok: true });
   } catch (error) {
-    if (claimed.length) await db.collection("converter_products").deleteMany({ _id: { $in: claimed } as any }).catch(() => {});
+    await releaseProducts(db, claimed);
     const detail = String((error as Error)?.message || error).slice(0, 300);
-    // Telegram refusing this exact post (too long, already deleted, not changed) will never succeed on a retry; retrying only blocks the posts behind it.
+    // Telegram refusing this exact post (too long, not changed) will never succeed on a retry; retrying only blocks the posts behind it.
     if (/^Telegram \(4(?!29)\d\d\)|Send up to 10 links|too long for Telegram/.test(detail)) {
-      await updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } });
-      const at = new Date().toISOString();
-      lastBackground = db.collection("converter_logs").insertOne({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, chat_title: chatName(msg.chat), store: "Other", original: text.match(/https?:\/\/\S+/)?.[0] || text.slice(0, 200), cleaned: null, converted: null,
-        status: "failed", error: `Post left as it was: ${detail}`, message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: at, convert_ms: Date.now() - receivedAt, total_ms: Math.max(0, Date.now() - messageAt) }).then(() => {}, () => {});
+      lastBackground = Promise.all([finish(), logs.insertOne({ ...base(), service: null, store: "Other", original: text.match(/https?:\/\/\S+/)?.[0] || text.slice(0, 200), cleaned: null, converted: null, status: "failed", error: `Post left as it was: ${detail}` })]).then(() => {}, () => {});
       return Response.json(msg.chat.type === "channel" ? { ok: true } : { method: "sendMessage", chat_id: msg.chat.id, text: `Conversion failed: ${detail}` });
     }
-    await updates.updateOne({ _id: key }, { $set: { locked_until: 0 } });
+    if (await lock.catch(() => null) === "go") await updates.updateOne({ _id: key }, { $set: { locked_until: 0 } });
     throw error;
   }
 }

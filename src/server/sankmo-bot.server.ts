@@ -125,6 +125,7 @@ export async function verifyLoginCode(code: string, password?: string) {
     if (!user) throw new Error("Authorization not confirmed");
     const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || "Telegram user";
     await (await settingsCol()).updateOne({ id: "main" }, { $set: { tg_session: seal(c.session.save()), tg_user: name } }, { upsert: true });
+    await (await import("./telegram-converter.server")).settingsChanged(["tg_session"]);
     await (await pendingCol()).updateOne({ _id: "sankmo" as any }, { $unset: { state: "" }, $set: { expires_at: new Date(0) } });
     return { connected: true, user: name };
   } catch (e: any) {
@@ -141,6 +142,7 @@ export async function disconnectBot() {
   client = null;
   await (await pendingCol()).updateOne({ _id: "sankmo" as any }, { $unset: { state: "" }, $set: { expires_at: new Date(0) } });
   await (await settingsCol()).updateOne({ id: "main" }, { $unset: { tg_session: "", tg_user: "" } });
+  await (await import("./telegram-converter.server")).settingsChanged(["tg_session"]);
   return { connected: false };
 }
 

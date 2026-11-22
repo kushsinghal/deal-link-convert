@@ -7,14 +7,16 @@ const { pairingCode, validPairing, receiveConverter, webhookSecret } = converter
 const state = vi.hoisted(() => ({ paired: false, done: false, sends: [] as any[] }));
 vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: string) => ({
   findOne: async () => name === "telegram_converter_chats" ? state.paired ? {} : null : state.done ? { done: true } : null,
-  insertOne: async () => ({}),
+  insertOne: async () => { if (name === "telegram_converter_updates" && state.done) throw Object.assign(new Error("dup"), { code: 11000 }); return {}; },
   insertMany: async () => ({}),
+  bulkWrite: async () => ({}),
+  createIndex: async () => ({}),
   deleteMany: async () => ({}),
-  find: () => ({ toArray: async () => [] }),
+  find: () => ({ toArray: async () => [], limit: () => ({ toArray: async () => [] }) }),
   updateOne: async (_filter: any, patch: any) => { if (patch.$set?.done) state.done = true; return { modifiedCount: 1 }; },
 }) }), db: { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: "main", telegram_converter_token: "123456:" + "a".repeat(30), sankmo_token: "configured", earnkaro_token: "configured" }, error: null }) }) }) }) } }));
 
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); state.paired = false; state.done = false; state.sends = []; });
+afterEach(() => { converter.resetConverterCaches(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); state.paired = false; state.done = false; state.sends = []; });
 const token = "123456:" + "a".repeat(30);
 function mockProviders() {
   // Isolate MOCKED backup tests from the live secure ExtraPe environment.

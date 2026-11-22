@@ -92,7 +92,7 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
           className="block h-9 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800">
           {[[5, "5 minutes"], [10, "10 minutes"], [15, "15 minutes"], [20, "20 minutes"], [30, "30 minutes"], [60, "1 hour"]].map(([value, text]) => <option key={value} value={value}>{text}</option>)}
         </select>
-        <p data-testid="converter-repeat-help" className="text-xs text-slate-500">Each channel or group is checked on its own. If a product was already posted in that chat within this time, the repeat post is deleted from the channel and is not converted (the bot must be an admin that can delete messages). In groups the bot simply does not reply. Your private chat with the bot is never checked.</p>
+        <p data-testid="converter-repeat-help" className="text-xs text-slate-500">Each channel or group is checked on its own. If a product was already posted in that chat within this time, the repeat post is deleted from the channel and is not converted (the bot must be an admin that can delete messages). In groups the bot simply does not reply. Your private chat with the bot is never checked. The repeat is deleted before any conversion is done. A listing converted in the last 24 hours reuses its link instead of asking the converter again. If a post is deleted before the bot can edit it, the bot posts the converted message as a new post (only while the post is less than 10 minutes old).</p>
       </div>
       <div className="space-y-2 border-t border-slate-200 pt-4">
         <Label>Bot reply style</Label>

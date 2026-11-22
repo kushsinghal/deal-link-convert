@@ -55,7 +55,11 @@ export async function getSettings() {
 
 async function updateSettings(patch: any) {
   const db = await getDb();
+  const bot = await import("./telegram-converter.server");
+  // Only a real change to the converter setup drops the bot's remembered links.
+  const before = Object.keys(patch).some((k) => bot.ROUTE_KEYS.includes(k)) ? await getSettings() : null;
   await check(await db.from("settings").upsert({ ...patch, id: "main", updated_at: now() }));
+  await bot.settingsChanged(before ? Object.keys(patch).filter((k) => JSON.stringify(patch[k]) !== JSON.stringify(before[k])) : []);
 }
 
 async function safeConvert(url: string, settings: any) {

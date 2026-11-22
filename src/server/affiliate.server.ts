@@ -10,14 +10,20 @@ function isOwnAffiliateLink(url: string, settings: any) {
 
 export type KnownLink = (url: string) => Promise<{ cleaned?: string } | null>;
 
-export async function convertAffiliate(original: string, settings: any, fast = false, known?: KnownLink) {
+/** Step 1: find the real product page. Links that need no converter come back finished (no "pending"). */
+export async function cleanAffiliate(original: string, settings: any, fast = false, known?: KnownLink, opened?: string) {
   if (isOwnAffiliateLink(original, settings)) {
     return { original, cleaned: original, converted: original, changed: false, error: null as string | null, store: engine.detectStore(original), own: true };
   }
   // A link this bot made earlier is already yours: it is kept, not converted a second time.
   const prior = known ? await known(original).catch(() => null) : null;
   if (prior?.cleaned) return { original, cleaned: prior.cleaned, converted: original, changed: false, error: null as string | null, store: engine.detectStore(prior.cleaned), own: true };
-  const cleaned = await engine.cleanLink(original, fast);
+  const cleaned = opened || await engine.cleanLink(original, fast);
+  return { original, cleaned, converted: cleaned, changed: false, error: null as string | null, store: engine.detectStore(cleaned), pending: true };
+}
+
+/** Step 2: ask the converter for the affiliate link. */
+export async function finishAffiliate({ original, cleaned }: { original: string; cleaned: string }, settings: any) {
   const used: { service?: string } = {};
   try {
     const converted = await engine.convertLink(cleaned, settings, used);
@@ -31,14 +37,23 @@ export async function convertAffiliate(original: string, settings: any, fast = f
   }
 }
 
+export async function convertAffiliate(original: string, settings: any, fast = false, known?: KnownLink) {
+  const step: any = await cleanAffiliate(original, settings, fast, known);
+  return step.pending ? finishAffiliate(step, settings) : step;
+}
+
 type Entity = { type: string; offset: number; length: number; url?: string | undefined; [key: string]: unknown };
 type Span = { start: number; end: number; url: string; raw: string };
 type Replacement = { start: number; end: number; newStart: number; newEnd: number };
 
 const linkLabel = (store: string) => `@${(store && store !== "Other" ? store : "Link").replace(/\s+/g, "")}`;
 
+const SOCIAL = /^(?:[^.]+\.)?(?:x\.com|twitter\.com|t\.me|telegram\.me|facebook\.com|instagram\.com|youtube\.com|youtu\.be|wa\.me|whatsapp\.com)$/;
+/** Social and chat links are never converted or opened. */
+export const socialLink = (url: string) => SOCIAL.test(new URL(url).hostname) ? { original: url, cleaned: url, converted: url, changed: false, error: null, store: "Other", unsupported: true } : null;
+
 /** Telegram offsets and JavaScript slices both use UTF-16 code units. */
-export async function convertAffiliateText(text: string, settings: any, entities: Entity[] = [], known?: KnownLink) {
+export function findLinks(text: string, entities: Entity[] = []) {
   const spans: Span[] = [...text.matchAll(/https?:\/\/[^\s<>"')\]]+/g)].map((m) => {
     const url = m[0].replace(/[.,;!]+$/, "");
     return { start: m.index!, end: m.index! + url.length, url, raw: url };
@@ -53,12 +68,17 @@ export async function convertAffiliateText(text: string, settings: any, entities
   const linkEntities = entities.filter((e) => e.type === "text_link" && e.url);
   const urls = [...new Set([...spans.map((s) => s.url), ...linkEntities.map((e) => e.url!)])];
   if (urls.length > 10) throw new Error("Send up to 10 links in one message");
-  const items = await Promise.all(urls.map((url) => {
-    const host = new URL(url).hostname;
-    if (/^(?:[^.]+\.)?(?:x\.com|twitter\.com|t\.me|telegram\.me|facebook\.com|instagram\.com|youtube\.com|youtu\.be|wa\.me|whatsapp\.com)$/.test(host))
-      return Promise.resolve({ original: url, cleaned: url, converted: url, changed: false, error: null, store: "Other", unsupported: true });
-    return convertAffiliate(url, settings, true, known);
-  }));
+  return { spans, urls };
+}
+
+export async function convertAffiliateText(text: string, settings: any, entities: Entity[] = [], known?: KnownLink) {
+  const found = findLinks(text, entities);
+  const items = await Promise.all(found.urls.map((url) => socialLink(url) ?? convertAffiliate(url, settings, true, known)));
+  return renderConverted(text, entities, found.spans, items, settings);
+}
+
+/** Puts the converted links back into the message and moves Telegram's formatting marks to match. */
+export function renderConverted(text: string, entities: Entity[], spans: Span[], items: any[], settings: any) {
   const byUrl = new Map(items.map((i) => [i.original, i]));
 
   let message = "";
