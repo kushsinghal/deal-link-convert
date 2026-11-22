@@ -193,6 +193,15 @@ const connectedLocal = new Set<string>();
 let settingsCache: { at: number; value: any } | null = null;
 let indexed = false;
 
+// Links the channel reader just posted: the bot must not treat that post as a repeat and delete it.
+const readerPosted = new Map<string, number>();
+export function markReaderPost(urls: string[]) {
+  const until = Date.now() + 10 * 60_000;
+  if (readerPosted.size > 2000) for (const [k, v] of readerPosted) if (v < Date.now()) readerPosted.delete(k);
+  for (const u of urls) readerPosted.set(u, until);
+}
+const isReaderPost = (urls: string[]) => urls.length > 0 && urls.every((u) => (readerPosted.get(u) ?? 0) > Date.now());
+
 export function resetConverterCaches() { local.clear(); localClaims.clear(); connectedLocal.clear(); settingsCache = null; }
 
 export const ROUTE_KEYS = ["converter_bot_service", "converter_order", "affiliate_routes", "affiliate_chains", "amazon_route", "amazon_tag", "extrape_token", "earnkaro_token", "sankmo_token", "sankmo_api_url", "convert_mode", "convert_enabled", "tg_session"];
@@ -348,6 +357,7 @@ export async function receiveConverter(request: Request, body: unknown) {
   lock.catch(() => {});
   try {
     const found = findLinks(text, entities);
+    if (!direct && isReaderPost(found.urls)) return Response.json({ ok: true });
     const lookups = found.urls.filter((u) => !socialLink(u) && (isShortLink(u) || detectStore(u) === "Other"));
     const [memo, older] = await Promise.all([
       recall(db, lookups.flatMap((u) => [`o:${u}`, `s:${u}`])),

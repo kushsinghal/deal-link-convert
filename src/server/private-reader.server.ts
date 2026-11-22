@@ -47,6 +47,7 @@ export async function ensureReader() {
 }
 
 export async function restartReader() {
+  settingsCache = null;
   await stopReader();
   checkedAt = 0;
   await ensureReader();
@@ -134,30 +135,85 @@ async function firstTime(key: string) {
   }
 }
 
-async function postBotToken(settings: any) {
+type Poster = { prefix: string; resolve(chat: string): Promise<string>; send(chatId: string, text: string, photo: Buffer | null): Promise<unknown>; warm(): void };
+const accountChats = new Map<string, any>();
+
+/** Posting from the spare account uses the connection that is already open: no extra trip to Telegram's bot server. */
+function accountPoster(settings: any): Poster {
+  return {
+    // Same repeat keys as the converter bot uses for that channel, so both share one memory.
+    prefix: String(settings.telegram_converter_token || "").split(":")[0] || "acct",
+    async resolve(chat) {
+      const name = botChat(chat).slice(1);
+      let e = accountChats.get(name);
+      if (!e) { e = await attached.getEntity(name); accountChats.set(name, e); }
+      const id = `-100${e.id}`;
+      accountChats.set(id, e);
+      return id;
+    },
+    async send(chatId, text, photo) {
+      const entity = accountChats.get(chatId);
+      const run = photo
+        ? import("telegram/client/uploads").then(({ CustomFile }) => attached.sendFile(entity, { file: new CustomFile("deal.jpg", photo.length, "", photo), caption: text }))
+        : attached.sendMessage(entity, { message: text, linkPreview: true });
+      return Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(new Error("Telegram did not confirm the post within 10 s")), 10_000))]);
+    },
+    warm() {},
+  };
+}
+
+async function botPoster(settings: any): Promise<Poster> {
+  let token = settings.telegram_converter_token as string | undefined;
   if (settings.reader_post_bot && settings.reader_post_bot !== "converter") {
     const d = await (await mongo()).collection("destinations").findOne({ id: settings.reader_post_bot }, { projection: { bot_token: 1 } });
-    if (d?.bot_token) return d.bot_token as string;
+    if (d?.bot_token) token = d.bot_token;
   }
-  if (!settings.telegram_converter_token) throw new Error("No posting bot: save the converter bot token in Affiliate Setup → Telegram bot");
-  return settings.telegram_converter_token as string;
+  if (!token) throw new Error("No posting bot: pick one in Channel Reader or save the converter bot token");
+  const t = token;
+  const conv = await import("./telegram-converter.server");
+  return {
+    prefix: t.split(":")[0] || "bot",
+    async resolve(chat) {
+      const k = `${t}:${chat}`;
+      if (!destIds.has(k)) destIds.set(k, String((await conv.telegramCall(t, "getChat", { chat_id: botChat(chat) })).id));
+      return destIds.get(k)!;
+    },
+    async send(chatId, text, photo) {
+      if (!photo) return conv.telegramCall(t, "sendMessage", { chat_id: chatId, text }, 1);
+      const form = new FormData();
+      form.append("chat_id", chatId);
+      form.append("caption", text);
+      form.append("photo", new Blob([new Uint8Array(photo)], { type: "image/jpeg" }), "deal.jpg");
+      const r = await fetch(`https://api.telegram.org/bot${t}/sendPhoto`, { method: "POST", body: form, signal: AbortSignal.timeout(15_000) });
+      const data: any = await r.json().catch(() => ({}));
+      if (!data.ok) throw new Error(`Telegram (${r.status}): ${data.description || "sendPhoto failed"}`);
+      return data.result;
+    },
+    // Opens the connection to the bot server now, so it is ready when the post goes out.
+    warm() { void fetch(`https://api.telegram.org/bot${t}/getMe`, { signal: AbortSignal.timeout(5000) }).then((r) => r.body?.cancel(), () => {}); },
+  };
 }
 
-async function destId(token: string, chat: string, call: any) {
-  const k = `${token.split(":")[0]}:${chat}`;
-  if (!destIds.has(k)) destIds.set(k, String((await call(token, "getChat", { chat_id: botChat(chat) })).id));
-  return destIds.get(k)!;
+let settingsCache: { at: number; v: any } | null = null;
+export const forgetReaderSettings = () => { settingsCache = null; };
+async function readerSettings() {
+  if (!settingsCache || Date.now() - settingsCache.at > 15_000) settingsCache = { at: Date.now(), v: await getSettings() };
+  return settingsCache.v;
 }
 
-async function sendPhoto(token: string, chatId: string, photo: Buffer, caption: string) {
-  const form = new FormData();
-  form.append("chat_id", chatId);
-  form.append("caption", caption);
-  form.append("photo", new Blob([new Uint8Array(photo)], { type: "image/jpeg" }), "deal.jpg");
-  const r = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: "POST", body: form, signal: AbortSignal.timeout(15_000) });
-  const data: any = await r.json().catch(() => ({}));
-  if (!data.ok) throw new Error(`Telegram (${r.status}): ${data.description || "sendPhoto failed"}`);
-  return data.result;
+const UNSUPPORTED = /does not support|INVALID_URL|requires approval|not supported/i;
+const good = (r: any) => !!r && !r.error && r.changed;
+/** ExtraPe first; if it has not answered within 0.9 s, Sankmo is asked too and the first working link wins.
+ * Each one still falls back to the rest of the converter order when it fails. */
+export function hedgedConvert(p: any, settings: any, hedgeMs = 900): Promise<any> {
+  const extrape = finishAffiliate(p, { ...settings, force_service: "extrape" });
+  if (!settings.tg_session || p.store === "Amazon" || !settings.extrape_token) return extrape;
+  return new Promise((resolve) => {
+    let pending = 1, firstResult: any = null;
+    const settle = (r: any) => { firstResult ??= r; if (good(r)) resolve(r); else if (--pending === 0) resolve(firstResult); };
+    const timer = setTimeout(() => { pending++; void finishAffiliate(p, { ...settings, force_service: "sankmo" }).then((r) => settle({ ...r, hedged: true })); }, hedgeMs);
+    void extrape.then((r) => { if (good(r)) clearTimeout(timer); settle(r); });
+  });
 }
 
 export let lastReaderJob: Promise<void> = Promise.resolve();
@@ -190,91 +246,85 @@ async function handle(src: Source, m: any, via: string, receivedAt: number, mess
   const text = String(m.message || "");
   const urls = messageLinks(m).filter((u) => { try { return !socialLink(u) && (detectStore(u) !== "Other" || isShortLink(u)); } catch { return false; } });
   if (!urls.length) return;
-  if (!await firstTime(`${src.id}:${m.id}`)) return;
-  state.last_read = { at: new Date(receivedAt).toISOString(), source: src.name, message_id: m.id, via, title: parseDeal(text).title, delivery_ms: Math.max(0, receivedAt - messageAt) };
   const conv = await import("./telegram-converter.server");
-  const settings = await getSettings();
-  const token = await postBotToken(settings);
   const db = await mongo();
-  // Opens a connection to Telegram's bot server now, so it is ready when the post goes out.
-  const warm = fetch(`https://api.telegram.org/bot${token}/getMe`, { signal: AbortSignal.timeout(5000) }).then((r) => r.body?.cancel(), () => {});
-
-  const openStart = Date.now();
-  const memo = await conv.recall(db, urls.map((u) => `s:${u}`));
-  const steps: any[] = await Promise.all(urls.map((u) => cleanAffiliate(u, settings, true, undefined, memo.get(`s:${u}`))));
-  const openMs = Date.now() - openStart;
-  const products = steps.filter((s) => s.pending && s.store !== "Other");
+  const [isNew, settings, memo] = await Promise.all([firstTime(`${src.id}:${m.id}`), readerSettings(), conv.recall(db, urls.map((u) => `s:${u}`))]);
+  if (!isNew) return;
   const deal = parseDeal(text);
-  const base = { source: "reader", chat_type: "channel", message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), deliver_ms: Math.max(0, receivedAt - messageAt), open_ms: openMs };
-  if (!products.length) {
-    await db.collection("converter_logs").insertOne({ ...base, id: crypto.randomUUID(), chat_title: `Reader: ${src.name}`, store: "Other", original: urls[0], cleaned: steps[0]?.cleaned, converted: null, status: "failed", error: "No shop link in this post", replied_at: new Date().toISOString(), total_ms: Date.now() - messageAt });
-    return;
-  }
-
-  // Repeat check per destination, by product, shared with the converter bot's memory of that channel.
-  const bot = token.split(":")[0];
-  const repeatMs = Math.max(5, Number(settings.converter_repeat_minutes) || 5) * 60_000;
+  state.last_read = { at: new Date(receivedAt).toISOString(), source: src.name, message_id: m.id, via, title: deal.title, delivery_ms: Math.max(0, receivedAt - messageAt) };
+  const poster = settings.reader_post_bot === "account" || !settings.reader_post_bot ? accountPoster(settings) : await botPoster(settings);
+  poster.warm();
+  // Opens the connection to ExtraPe while the short link is being opened, so the conversion starts on a ready connection.
+  void fetch("https://www.extrape.com/", { method: "HEAD", signal: AbortSignal.timeout(3000) }).then((r) => r.body?.cancel(), () => {});
   const price = priceNumber(deal.price);
   const dests = (settings.reader_destinations || []).filter((d: any) => !d.min_price || price > d.min_price);
+  const destIdsReady = Promise.all(dests.map((d: any) => poster.resolve(d.chat).then((id) => ({ d, id }), (e) => { fail(`channel ${botChat(d.chat)}`, e); return null; })));
+  // Optional test mode: the source's short link goes straight to the converter while it is also opened.
+  const direct = new Map<string, Promise<any>>();
+  if (settings.reader_try_short) for (const u of urls) if (isShortLink(u) && !memo.has(`s:${u}`)) direct.set(u, hedgedConvert({ original: u, cleaned: u }, settings));
+
+  const openStart = Date.now();
+  const steps: any[] = await Promise.all(urls.map((u) => cleanAffiliate(u, settings, true, undefined, memo.get(`s:${u}`))));
+  const openMs = Date.now() - openStart;
+  const products = steps.filter((x) => x.pending && x.store !== "Other");
+  const base = { source: "reader", chat_type: "channel", message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), deliver_ms: Math.max(0, receivedAt - messageAt), open_ms: openMs };
+  const log = (rows: any[]) => db.collection("converter_logs").insertMany(rows.map((r) => ({ ...base, id: crypto.randomUUID(), replied_at: new Date().toISOString(), total_ms: Date.now() - messageAt, ...r }))).catch(() => {});
+  if (!products.length) { await log([{ chat_title: `Reader: ${src.name}`, store: "Other", original: urls[0], cleaned: steps[0]?.cleaned, converted: null, status: "failed", error: "No shop link in this post" }]); return; }
+
+  // The repeat check and the conversion run at the same time; a repeat simply throws the new link away (it stays remembered).
+  const repeatMs = Math.max(5, Number(settings.converter_repeat_minutes) || 5) * 60_000;
+  const keyOf = (id: string, p: any) => `${poster.prefix}:${id}:${productKey(p.cleaned)}`;
   const askStart = Date.now();
-  const [claims, links] = await Promise.all([
-    Promise.all(dests.map(async (d: any) => {
-      try {
-        const id = await destId(token, d.chat, conv.telegramCall);
-        const keys = [...new Set(products.map((p) => `${bot}:${id}:${productKey(p.cleaned)}`))];
-        return { d, id, keys, fresh: await conv.claimProducts(db, keys, repeatMs) };
-      } catch (e) { fail(`channel ${botChat(d.chat)}`, e); return null; }
-    })).then((all) => all.filter((x): x is NonNullable<typeof x> => !!x)),
-    conv.recall(db, products.map((p) => conv.reuseKey(p.cleaned))),
-  ]);
-  const wanted = claims.filter((c) => c.fresh.length);
-  if (!claims.length && dests.length) throw new Retry("No destination channel could be reached");
-  if (!wanted.length) {
-    await db.collection("converter_logs").insertMany(claims.map((c) => ({ ...base, id: crypto.randomUUID(), chat_id: c.id, chat_title: `Reader: ${src.name} → ${botChat(c.d.chat)}`, store: products[0]?.store, original: products[0]?.original, cleaned: products[0]?.cleaned, converted: null, status: "repeat", error: `Same product was already posted in this channel in the last ${repeatMs / 60_000} min`, replied_at: new Date().toISOString(), total_ms: Date.now() - messageAt })));
-    return;
-  }
-  const items: any[] = await Promise.all(products.map((p) => {
+  const claimsP = destIdsReady.then((all) => Promise.all(all.filter((x): x is { d: any; id: string } => !!x).map(async ({ d, id }) => {
+    const fresh = await conv.claimProducts(db, [...new Set(products.map((p) => keyOf(id, p)))], repeatMs);
+    return { d, id, fresh };
+  })));
+  const itemsP = conv.recall(db, products.map((p) => conv.reuseKey(p.cleaned))).then((links) => Promise.all(products.map(async (p) => {
     const hit = links.get(conv.reuseKey(p.cleaned));
-    return hit?.converted ? { ...p, converted: hit.converted, changed: true, error: null, service: hit.service, reused: true } : finishAffiliate(p, settings);
-  }));
+    if (hit?.converted) return { ...p, converted: hit.converted, changed: true, error: null, service: hit.service, reused: true };
+    const early = direct.get(p.original);
+    if (early) { const r = await early; if (good(r)) return { ...r, cleaned: p.cleaned, store: p.store, direct: true }; }
+    return hedgedConvert(p, settings);
+  })));
+  const [claims, items] = await Promise.all([claimsP, itemsP]);
   const serviceMs = Date.now() - askStart;
-  const good = items.filter((i) => !i.error && i.changed);
-  const goodKeys = new Set(good.map((i) => productKey(i.cleaned)));
-  const releaseLost = () => conv.releaseProducts(db, claims.flatMap((c) => c.fresh.filter((k: string) => !goodKeys.has(k.split(":").slice(2).join(":")))));
-  if (!good.length) {
-    await releaseLost();
-    await db.collection("converter_logs").insertMany(items.map((i) => ({ ...base, id: crypto.randomUUID(), chat_title: `Reader: ${src.name}`, store: i.store, original: i.original, cleaned: i.cleaned, converted: null, status: "failed", error: i.error || "Not converted; nothing posted", service_ms: serviceMs, replied_at: new Date().toISOString(), total_ms: Date.now() - messageAt })));
+  const made = items.filter(good);
+  void conv.remember(db, [
+    ...made.filter((i) => !i.reused).map((i): [string, any, number] => [conv.reuseKey(i.cleaned), { converted: i.converted, service: i.service || null }, DAY]),
+    ...steps.filter((x) => x.cleaned !== x.original && !memo.has(`s:${x.original}`) && !isShortLink(x.cleaned)).map((x): [string, any, number] => [`s:${x.original}`, x.cleaned, DAY]),
+  ]).catch(() => {});
+  if (!claims.length && dests.length) throw new Retry("No destination channel could be reached");
+
+  // Each channel gets only the products that are new there and were converted.
+  const plan = claims.map((c) => ({ ...c, items: made.filter((i) => c.fresh.includes(keyOf(c.id, i))) }));
+  const lost = plan.flatMap((c) => c.fresh.filter((k: string) => !c.items.some((i) => keyOf(c.id, i) === k)));
+  const wanted = plan.filter((c) => c.items.length);
+  if (!wanted.length) {
+    await conv.releaseProducts(db, lost);
+    const repeat = claims.length && claims.every((c) => !c.fresh.length);
+    await log(repeat
+      ? claims.map((c) => ({ chat_id: c.id, chat_title: `Reader: ${src.name} → ${botChat(c.d.chat)}`, store: products[0]?.store, original: products[0]?.original, cleaned: products[0]?.cleaned, converted: null, status: "repeat", error: `Same product was already posted in this channel in the last ${repeatMs / 60_000} min`, service_ms: serviceMs }))
+      : items.map((i) => ({ chat_title: `Reader: ${src.name}`, store: i.store, original: i.original, cleaned: i.cleaned, converted: null, status: "failed", error: i.error || (dests.length ? "Not converted; nothing posted" : "No channel takes this price"), service_ms: serviceMs })));
     for (const i of items) await conv.alertIfKeyFailed(i.error);
-    if (items.some((i) => i.error && !/does not support|INVALID_URL|requires approval|not supported/i.test(i.error))) throw new Retry(items[0]?.error || "conversion failed");
+    if (!repeat && items.some((i) => i.error && !UNSUPPORTED.test(i.error))) throw new Retry(items[0]?.error || "conversion failed");
     return;
   }
-  const post = buildPost(deal, good.map((i) => ({ store: i.store, url: i.converted })), settings.reader_caption || "");
   const photo = settings.reader_photo && m.photo ? await (attached?.downloadMedia(m, {}) as Promise<Buffer>).catch(() => null) : null;
-  await warm;
+  conv.markReaderPost(made.map((i) => i.converted));
   const sendStart = Date.now();
   const sent = await Promise.all(wanted.map(async (c) => {
-    try {
-      if (photo) await sendPhoto(token, c.id, photo, post);
-      else await conv.telegramCall(token, "sendMessage", { chat_id: c.id, text: post }, 1);
-      return { c, ok: true, at: Date.now() };
-    } catch (e: any) { return { c, ok: false, error: String(e?.message || e).slice(0, 300), at: Date.now() }; }
+    const post = buildPost(deal, c.items.map((i) => ({ store: i.store, url: i.converted })), settings.reader_caption || "");
+    try { await poster.send(c.id, post, photo); return { c, ok: true, at: Date.now() }; } catch (e: any) { return { c, ok: false, error: String(e?.errorMessage || e?.message || e).slice(0, 300), at: Date.now() }; }
   }));
-  await releaseLost();
-  const failedSends = sent.filter((s) => !s.ok);
-  if (failedSends.length) await conv.releaseProducts(db, failedSends.flatMap((s) => s.c.fresh));
-  const firstOk = sent.find((s) => s.ok);
-  if (firstOk) state.last_sent = { at: new Date(firstOk.at).toISOString(), source: src.name, to: sent.filter((s) => s.ok).map((s) => botChat(s.c.d.chat)), total_ms: firstOk.at - messageAt, title: deal.title };
+  const failedSends = sent.filter((x) => !x.ok);
+  await conv.releaseProducts(db, [...lost, ...failedSends.flatMap((x) => x.c.fresh)]);
+  const firstOk = sent.find((x) => x.ok);
+  if (firstOk) state.last_sent = { at: new Date(firstOk.at).toISOString(), source: src.name, to: sent.filter((x) => x.ok).map((x) => botChat(x.c.d.chat)), total_ms: firstOk.at - messageAt, title: deal.title, by: poster.prefix === "acct" || settings.reader_post_bot === "account" ? "spare account" : "bot" };
   if (failedSends.length) fail("send", failedSends[0]?.error);
-
-  await db.collection("converter_logs").insertMany(sent.flatMap((s) => items.map((i) => ({
-    ...base, id: crypto.randomUUID(), chat_id: s.c.id, chat_title: `Reader: ${src.name} → ${botChat(s.c.d.chat)}`, service: i.service || null, reused: !!i.reused, store: i.store,
-    original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted, status: !s.ok || i.error ? "failed" : "converted", error: s.ok ? i.error || null : `Post not sent: ${s.error}`,
-    service_ms: i.reused ? 0 : serviceMs, telegram_ms: s.at - sendStart, replied_at: new Date(s.at).toISOString(), total_ms: s.at - messageAt,
+  await log(sent.flatMap((x) => x.c.items.map((i: any) => ({
+    chat_id: x.c.id, chat_title: `Reader: ${src.name} → ${botChat(x.c.d.chat)}`, service: i.service || null, reused: !!i.reused, store: i.store, original: i.original, cleaned: i.cleaned,
+    converted: i.converted, status: x.ok ? "converted" : "failed", error: x.ok ? null : `Post not sent: ${x.error}`, service_ms: i.reused ? 0 : serviceMs, telegram_ms: x.at - sendStart, replied_at: new Date(x.at).toISOString(), total_ms: x.at - messageAt,
   }))));
-  await conv.remember(db, [
-    ...good.filter((i) => !i.reused).map((i): [string, any, number] => [conv.reuseKey(i.cleaned), { converted: i.converted, service: i.service || null }, DAY]),
-    ...steps.filter((s) => s.cleaned !== s.original && !memo.has(`s:${s.original}`) && !isShortLink(s.cleaned)).map((s): [string, any, number] => [`s:${s.original}`, s.cleaned, DAY]),
-  ]).catch(() => {});
   // Channels that already got the post count as repeats on the retry, so only the failed channel is tried again.
   if (failedSends.length) throw new Retry(failedSends[0]?.error || "send failed");
 }

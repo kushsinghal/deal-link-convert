@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const st = vi.hoisted(() => ({ sent: [] as any[], logs: [] as any[], seen: new Set<string>(), claims: new Map<string, number>(), convertCalls: 0, fail: false, brokenChat: "", settings: {} as any }));
+const st = vi.hoisted(() => ({ sent: [] as any[], logs: [] as any[], seen: new Set<string>(), claims: new Map<string, number>(), convertCalls: 0, fail: false, brokenChat: "", slowExtrape: false, marked: [] as string[], settings: {} as any }));
 vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: string) => ({
   insertOne: async (doc: any) => { if (name === "reader_seen") { if (st.seen.has(doc._id)) throw Object.assign(new Error("dup"), { code: 11000 }); st.seen.add(doc._id); } else st.logs.push(doc); },
   insertMany: async (docs: any[]) => { st.logs.push(...docs); },
@@ -10,17 +10,20 @@ vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: 
 vi.mock("@/server/core.server", () => ({ getSettings: async () => st.settings }));
 vi.mock("@/server/affiliate.server", async (load) => ({ ...(await load<any>()),
   cleanAffiliate: async (u: string) => ({ original: u, cleaned: "https://www.flipkart.com/w/p/itm1?pid=WATHK63SGJGKHYED&lid=LSTWATHK63SGJGKHYEDXXIHUG", store: "Flipkart", pending: true }),
-  finishAffiliate: async (i: any) => { st.convertCalls++; return st.fail ? { ...i, error: "ExtraPe down", changed: false } : { ...i, converted: "https://fkrt.co/MINE", changed: true, error: null, service: "ExtraPe" }; },
+  finishAffiliate: async (i: any, set: any) => { st.convertCalls++;
+    if (st.slowExtrape && set.force_service === "extrape") { await new Promise((r) => setTimeout(r, 300)); return { ...i, converted: "https://fkrt.co/EXTRAPE", changed: true, error: null, service: "ExtraPe" }; }
+    if (set.force_service === "sankmo") return { ...i, converted: "https://fkrt.co/SANKMO", changed: true, error: null, service: "Sankmo" };
+    return st.fail ? { ...i, error: "ExtraPe down", changed: false } : { ...i, converted: "https://fkrt.co/MINE", changed: true, error: null, service: "ExtraPe" }; },
 }));
 vi.mock("@/server/telegram-converter.server", () => ({
   telegramCall: async (_t: string, method: string, body: any) => { if (method === "getChat" && st.brokenChat === body.chat_id) throw new Error("chat not found"); if (method === "getChat") return { id: body.chat_id === "@dealfetch" ? -1001 : -1002 }; st.sent.push(body); return { message_id: 1 }; },
-  recall: async () => new Map(), remember: async () => {}, reuseKey: (u: string) => `c:${u}`, alertIfKeyFailed: async () => {},
+  markReaderPost: (u: string[]) => { st.marked.push(...u); }, recall: async () => new Map(), remember: async () => {}, reuseKey: (u: string) => `c:${u}`, alertIfKeyFailed: async () => {},
   claimProducts: async (_db: any, keys: string[], ms: number) => keys.filter((k) => { const fresh = (st.claims.get(k) ?? 0) <= Date.now() - ms; if (fresh) st.claims.set(k, Date.now()); return fresh; }),
   releaseProducts: async (_db: any, keys: string[]) => { for (const k of keys) st.claims.delete(k); },
 }));
 globalThis.fetch = (async () => new Response("{}")) as any;
 
-const { onMessage } = await import("@/server/private-reader.server");
+const { onMessage, hedgedConvert, forgetReaderSettings } = await import("@/server/private-reader.server");
 const now = () => Math.floor(Date.now() / 1000);
 const tap = (id: number, price = "3,379") => ({ id, date: now(), message: `INVICTA Watch - For Men\n\nPrice: ₹${price}\n\nSuperCoins back: ₹3,356 (99.02%)\n\nSeller: RetailNet`,
   replyMarkup: { rows: [{ buttons: [{ url: "https://fkrt.co/pC10yP" }, { data: "x" }] }] } });
@@ -28,8 +31,9 @@ const src = (name: string, id: string) => ({ name, id, entity: null, lastId: 0, 
 
 describe("private reader pipeline", () => {
   beforeEach(() => {
-    Object.assign(st, { sent: [], logs: [], seen: new Set(), claims: new Map(), convertCalls: 0, fail: false, brokenChat: "" });
-    st.settings = { telegram_converter_token: "123456:abcdefghijklmnopqrstuvwxyz", converter_repeat_minutes: 5, reader_caption: "",
+    forgetReaderSettings();
+    Object.assign(st, { sent: [], logs: [], seen: new Set(), claims: new Map(), convertCalls: 0, fail: false, brokenChat: "", slowExtrape: false, marked: [] });
+    st.settings = { reader_post_bot: "converter", telegram_converter_token: "123456:abcdefghijklmnopqrstuvwxyz", converter_repeat_minutes: 5, reader_caption: "",
       reader_destinations: [{ chat: "https://t.me/dealfetch", min_price: 0 }, { chat: "https://t.me/Deltfetch", min_price: 4500 }] };
   });
   it("one source post makes one new post per channel, never a forward, with only our link", async () => {
@@ -79,6 +83,18 @@ describe("private reader pipeline", () => {
     st.settings.reader_destinations = [{ chat: "https://t.me/Brokenchan", min_price: 0 }, { chat: "https://t.me/dealfetch", min_price: 0 }];
     await onMessage(src("tapworthy", "44"), tap(11, "9,999"), "live");
     expect(st.sent.map((x) => x.chat_id)).toEqual(["-1001"]);
+  });
+  it("our own post is marked so the converter bot leaves it alone", async () => {
+    await onMessage(src("tapworthy", "44"), tap(12), "live");
+    expect(st.marked).toEqual(["https://fkrt.co/MINE"]);
+  });
+  it("slow ExtraPe: Sankmo is asked after the wait and the first working link wins", async () => {
+    st.slowExtrape = true;
+    const p = { original: "u", cleaned: "c", store: "Flipkart", pending: true };
+    const r = await hedgedConvert(p, { tg_session: "x", extrape_token: "y" }, 50);
+    expect(r.converted).toBe("https://fkrt.co/SANKMO");
+    const fast = await hedgedConvert(p, { tg_session: "x", extrape_token: "y" }, 1000);
+    expect(fast.converted).toBe("https://fkrt.co/EXTRAPE");
   });
   it("posts with no shop link (False alert / OOS) are ignored", async () => {
     await onMessage(src("tapworthy", "44"), { id: 7, date: now(), message: "False alert\nMVMT Watch\n\nThis deal only blinked" }, "live");

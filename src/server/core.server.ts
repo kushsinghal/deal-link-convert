@@ -43,7 +43,7 @@ const DEFAULT_SETTINGS = {
   copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_repeat_minutes: 5, converter_bot_service: "auto", converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
   reader_enabled: false, reader_caption: readerConfig.caption || "", reader_sources: readerConfig.sources,
   reader_destinations: readerConfig.destinations.map((chat) => ({ chat, min_price: /deltfetch/i.test(chat) ? 4500 : 0 })),
-  reader_post_bot: "converter", reader_photo: false,
+  reader_post_bot: "account", reader_photo: false, reader_try_short: false,
 };
 
 async function check(res: any) {
@@ -736,6 +736,11 @@ const publicDest = (d: any) => {
 };
 
 export async function listDestinations() {
+  const { mongo } = await import("./db.server");
+  const collection = (await mongo()).collection("destinations");
+  // Older rows were saved without an id, so Test / Edit / Delete could not find them.
+  const legacy = await collection.find({ id: { $exists: false } }, { projection: { _id: 1 } }).limit(100).toArray();
+  for (const row of legacy) await collection.updateOne({ _id: row._id, id: { $exists: false } }, { $set: { id: uuid(), created_at: now() } });
   const db = await getDb();
   return (await check(await db.from("destinations").select("*").order("created_at").limit(100))).map(publicDest);
 }
@@ -745,7 +750,7 @@ export async function addDestination(body: any) {
   const chat = String(body.chat_id || "").trim();
   if (!chat) throw new HttpError(400, "Chat ID is required");
   const db = await getDb();
-  const row = { name: String(body.name || "").trim() || chat, bot_token: body.bot_token.trim(), chat_id: chat, categories: body.categories || [],
+  const row = { id: uuid(), created_at: now(), name: String(body.name || "").trim() || chat, bot_token: body.bot_token.trim(), chat_id: chat, categories: body.categories || [],
     min_discount: Number(body.min_discount) || 0, stores: body.stores || [], enabled: body.enabled !== false };
   return publicDest(await check(await db.from("destinations").insert(row).select("*").single()));
 }
@@ -863,9 +868,9 @@ export async function writeSettings(body: any) {
 
 const CHANNEL = /^(?:https?:\/\/)?(?:t\.me\/|@)?([A-Za-z][A-Za-z0-9_]{3,31})$/;
 function validateReader(upd) {
-  for (const k of ["reader_enabled", "reader_photo"]) if (k in upd && typeof upd[k] !== "boolean") throw new HttpError(400, `${k} must be true or false`);
+  for (const k of ["reader_enabled", "reader_photo", "reader_try_short"]) if (k in upd && typeof upd[k] !== "boolean") throw new HttpError(400, `${k} must be true or false`);
   if ("reader_caption" in upd) upd.reader_caption = String(upd.reader_caption).slice(0, 500);
-  if ("reader_post_bot" in upd) upd.reader_post_bot = String(upd.reader_post_bot).slice(0, 64) || "converter";
+  if ("reader_post_bot" in upd) upd.reader_post_bot = String(upd.reader_post_bot).slice(0, 64) || "account";
   if ("reader_sources" in upd) {
     if (!Array.isArray(upd.reader_sources) || upd.reader_sources.length > 10) throw new HttpError(400, "List up to 10 source channels");
     upd.reader_sources = upd.reader_sources.map((x) => String(x).trim().match(CHANNEL)?.[1] || (() => { throw new HttpError(400, `Not a channel name: ${x}`); })());

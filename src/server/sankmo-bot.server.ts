@@ -164,27 +164,49 @@ function replyLinks(m: any) {
   return [...fromEntities, ...fromText, ...fromButtons].map((u: string) => u.replace(/[.,;!]+$/, ""));
 }
 
+let botUserId: string | null = null;
+
+/** The reply is picked up the moment it arrives (live update); a slower check every 1.5 s is the backup. */
 async function convertOnce(url: string) {
   const c = await getClient();
+  const { NewMessage } = await import("telegram/events");
+  if (!botUserId) botUserId = String((await c.getEntity(BOT)).id);
   const wait = 1500 - (Date.now() - lastSent);
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  let sent: any;
-  try { sent = await c.sendMessage(BOT, { message: url }); } catch (e: any) {
-    if (e?.seconds) throw new Error(`Sankmo bot: Telegram asked to wait ${e.seconds}s (flood protection)`);
-    throw new Error(`Sankmo bot: ${e?.errorMessage || e?.message || "send failed"}`);
-  }
-  lastSent = Date.now();
-  let lastText = "";
-  for (const deadline = Date.now() + 15000; Date.now() < deadline;) {
-    await new Promise((r) => setTimeout(r, 700));
-    const msgs = await c.getMessages(BOT, { limit: 5, minId: sent.id });
-    for (const m of msgs.filter((x: any) => !x.out).reverse()) {
-      lastText = String(m.message || "").slice(0, 160);
-      const link = replyLinks(m).find((u) => u !== url && !/t\.me\/|telegram\.me/i.test(u));
-      if (link) return link;
+  let sentId = 0, lastText = "", done = false;
+  const early: any[] = [];
+  let resolveLink!: (v: string) => void, rejectLink!: (e: Error) => void;
+  const result = new Promise<string>((res, rej) => { resolveLink = res; rejectLink = rej; });
+  result.catch(() => {});
+  const check = (m: any) => {
+    if (done || !m || m.out) return;
+    if (!sentId) { early.push(m); return; }
+    if (m.id <= sentId) return;
+    lastText = String(m.message || "").slice(0, 160);
+    const link = replyLinks(m).find((u) => u !== url && !/t\.me\/|telegram\.me/i.test(u));
+    if (link) { done = true; resolveLink(link); }
+  };
+  const event = new NewMessage({ incoming: true });
+  const handler = (e: any) => { if (String(e.message?.peerId?.userId ?? "") === botUserId) check(e.message); };
+  c.addEventHandler(handler, event);
+  const poll = setInterval(() => { c.getMessages(BOT, { limit: 5, minId: sentId }).then((msgs: any[]) => [...msgs].reverse().forEach(check), () => {}); }, 1500);
+  const timer = setTimeout(() => { done = true; rejectLink(new Error(`Sankmo bot: ${lastText || "no reply within 15s"}`)); }, 15000);
+  try {
+    let sent: any;
+    try { sent = await c.sendMessage(BOT, { message: url }); } catch (e: any) {
+      if (e?.seconds) throw new Error(`Sankmo bot: Telegram asked to wait ${e.seconds}s (flood protection)`);
+      throw new Error(`Sankmo bot: ${e?.errorMessage || e?.message || "send failed"}`);
     }
+    lastSent = Date.now();
+    sentId = sent.id;
+    early.splice(0).forEach(check);
+    return await result;
+  } finally {
+    done = true;
+    clearTimeout(timer);
+    clearInterval(poll);
+    try { c.removeEventHandler(handler, event); } catch { /* client closed */ }
   }
-  throw new Error(`Sankmo bot: ${lastText || "no reply within 15s"}`);
 }
 
 export function convertViaSankmoBot(url: string): Promise<string> {
