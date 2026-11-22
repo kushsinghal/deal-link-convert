@@ -39,7 +39,7 @@ const DEFAULT_SETTINGS = {
   bot_tweets_enabled: true, bot_tweets_public: true, bot_tweets_count: 7,
   check_interval_minutes: 5, check_interval_seconds: 300, post_style: "simple", max_posts_per_update: 20,
   website_max_age_hours: 24, telegram_max_age_minutes: 60, last_run_at: null,
-  copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_repeat_minutes: 360, converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
+  copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_repeat_minutes: 5, converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
 };
 
 async function check(res: any) {
@@ -843,7 +843,7 @@ export async function writeSettings(body: any) {
   clamp("website_max_age_hours", 1, 720);
   clamp("telegram_max_age_minutes", 1, 10080);
   clamp("max_posts_per_update", 1, 200);
-  clamp("converter_repeat_minutes", 0, 10080);
+  clamp("converter_repeat_minutes", 5, 60);
   await updateSettings(upd);
   return readSettings();
 }

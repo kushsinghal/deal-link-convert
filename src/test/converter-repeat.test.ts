@@ -44,6 +44,12 @@ async function post(chatId: number, url: string, type = "channel") {
 
 describe("same product in the same chat", () => {
   const a = "https://www.flipkart.com/x/p/itm1?pid=PID1&affid=other", sameProduct = "https://www.flipkart.com/other-name/p/itm1?pid=PID1&lid=L1";
+  it("still drops the repeat 2 minutes later but not in another channel", async () => {
+    await post(-1001, a);
+    state.products.forEach((_, k) => state.products.set(k, Date.now() - 2 * 60_000));
+    expect((await post(-1001, a)).methods).toEqual(["deleteMessage"]);
+    expect((await post(-1002, a)).methods).toEqual(["editMessageText"]);
+  });
   it("is checked per channel: the channel that already has it drops the repeat, the other accepts it", async () => {
     expect((await post(-1001, a)).methods).toEqual(["editMessageText"]);
     const repeat = await post(-1001, sameProduct);
@@ -59,7 +65,7 @@ describe("same product in the same chat", () => {
   });
   it("accepts the product again after the chosen time and never checks when turned off", async () => {
     await post(-1001, a);
-    state.products.forEach((_, k) => state.products.set(k, Date.now() - 361 * 60_000));
+    state.products.forEach((_, k) => state.products.set(k, Date.now() - 6 * 60_000));
     expect((await post(-1001, a)).methods).toEqual(["editMessageText"]);
     state.repeat = 0;
     expect((await post(-1001, a)).methods).toEqual(["editMessageText"]);

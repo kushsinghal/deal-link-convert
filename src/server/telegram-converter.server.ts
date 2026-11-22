@@ -254,7 +254,7 @@ export async function receiveConverter(request: Request, body: unknown) {
     const own = result.items.some((i: any) => i.own || i.keep_clean);
     const direct = msg.chat.type !== "channel";
     // Same product again in the same channel or group: one database check, done after the links are cleaned.
-    const repeatMinutes = msg.chat.type === "private" ? 0 : Math.max(0, Number(settings.converter_repeat_minutes ?? 360) || 0);
+    const repeatMinutes = msg.chat.type === "private" ? 0 : Math.max(0, Number(settings.converter_repeat_minutes ?? 5) || 0);
     if (repeatMinutes && (changed || own)) {
       const keys = [...new Set(result.items.filter((i: any) => !i.error && i.store !== "Other").map((i: any) => `${chatKey}:${productKey(i.cleaned)}`))];
       claimed = await claimProducts(db, keys, repeatMinutes * 60_000);
