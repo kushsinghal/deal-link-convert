@@ -107,7 +107,7 @@ export async function handle(request: Request, splat: string) {
       if (c === "disconnect") return json(await telegram.disconnectConverter());
       if (c === "menu") return json(await telegram.syncBotMenu());
     }
-    if (a === "reader" && b === "status" && method === "GET") return json((await import("./private-reader.server")).readerStatus());
+    if (a === "reader" && b === "status" && method === "GET") return json({ ...(await import("./private-reader.server")).readerStatus(), has_login: !!(await core.getSettings()).tg_session });
     if (a === "sankmo-bot") {
       const bot = await import("./sankmo-bot.server");
       try {

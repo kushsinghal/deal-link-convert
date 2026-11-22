@@ -42,6 +42,7 @@ export async function ensureReader() {
   checkedAt = Date.now();
   const settings = await getSettings();
   state.enabled = !!settings.reader_enabled;
+  if (settings.reader_enabled && !settings.tg_session && state.last_error?.where !== "login") state.last_error = { at: new Date().toISOString(), where: "login", message: "No Telegram login saved on this site. Log in with the spare account in Affiliate Setup → Keys & logins → Sankmo via Telegram." };
   if (settings.reader_enabled && !poller && settings.tg_session) await startReader();
   else if (!settings.reader_enabled && poller) await stopReader();
 }

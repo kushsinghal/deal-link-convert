@@ -84,7 +84,10 @@ function loginError(e: any) {
   if (/PASSWORD_HASH_INVALID/.test(code)) return new Error("That Telegram two-step password is incorrect.");
   if (/PHONE_NUMBER_INVALID/.test(code)) return new Error("Check your phone number and country code.");
   if (/API_ID_INVALID/.test(code)) return new Error("Telegram rejected the API ID/hash. Check the configured API credentials.");
-  return new Error("Telegram login could not be completed. Check your account and try again.");
+  if (/SEND_CODE_UNAVAILABLE/.test(code)) return new Error("Telegram won't send more codes right now (too many recent code requests). Wait a few hours, then try again.");
+  if (/PHONE_NUMBER_BANNED|PHONE_NUMBER_FLOOD/.test(code)) return new Error(`Telegram blocked login codes for this number for now (${code}). Try again later.`);
+  console.error("Telegram login failed", code);
+  return new Error(`Telegram login could not be completed${code ? ` (Telegram said: ${code.slice(0, 120)})` : ""}. Check your account and try again.`);
 }
 
 export async function sendLoginCode(phone: string) {

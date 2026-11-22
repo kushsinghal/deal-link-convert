@@ -21,9 +21,9 @@ const Cell = ({ label, testid, children, tone = "" }) => (
 );
 
 const StatusView = ({ st, load }) => (
-  <Panel testid="reader-status-panel" title="Reader status" desc="Updates every 5 seconds." action={<Button data-testid="reader-status-refresh" className={ghostBtn} onClick={load}><RefreshCw className="h-4 w-4" /></Button>}>
+  <Panel testid="reader-status-panel" title="Reader status" desc="Updates every 5 seconds. Every post the reader handles (sent, repeat, failed) with its timings is listed in Converter History as “Reader: source → channel”." action={<Button data-testid="reader-status-refresh" className={ghostBtn} onClick={load}><RefreshCw className="h-4 w-4" /></Button>}>
     <div className="grid gap-3 sm:grid-cols-2">
-      <Cell label="Connection" testid="reader-connected" tone={st.connected ? "text-emerald-800" : "text-rose-700"}>{st.connected ? `Connected as ${st.user}` : st.enabled ? "Not connected yet" : "Switched off"}</Cell>
+      <Cell label="Connection" testid="reader-connected" tone={st.connected ? "text-emerald-800" : "text-rose-700"}>{st.connected ? `Connected as ${st.user}` : !st.enabled ? "Switched off" : st.has_login === false ? "No Telegram login saved — log in first" : "Connecting…"}</Cell>
       <Cell label="Source channels" testid="reader-sources">{st.sources.length ? st.sources.map((s) => <p key={s.name} className={s.ok ? "text-emerald-800" : "text-rose-700"}>{s.ok ? "✓" : "✗"} {s.name}{s.error ? ` — ${s.error}` : ""}</p>) : "—"}</Cell>
       <Cell label="Last post read" testid="reader-last-read">{st.last_read ? `${st.last_read.source} #${st.last_read.message_id} · ${formatKolkata(st.last_read.at)}${st.last_read.title ? ` · ${st.last_read.title}` : ""} · reached the server ${((st.last_read.delivery_ms || 0) / 1000).toFixed(1)}s after posting (${st.last_read.via})` : "None yet"}</Cell>
       <Cell label="Last post sent" testid="reader-last-sent">{st.last_sent ? `${st.last_sent.to.join(", ")} · ${formatKolkata(st.last_sent.at)}${secs(st.last_sent.total_ms)}${st.last_sent.by ? ` · by ${st.last_sent.by}` : ""}` : "None yet"}
