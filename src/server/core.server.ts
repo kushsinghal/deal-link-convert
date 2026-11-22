@@ -253,7 +253,7 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
   deal.affiliate_url = await safeConvert(deal.clean_url, settings);
   deal.converted = deal.affiliate_url !== deal.clean_url;
   deal.featured = false;
-  deal.link_unresolved = source.id !== "manual" && (engine.isDealSite(deal.clean_url) || (engine.isShortLink(deal.clean_url) && engine.detectStore(deal.clean_url) === "Other"));
+  deal.link_unresolved = source.id !== "manual" && (engine.isDealSite(deal.clean_url) || engine.isShortLink(deal.clean_url));
   deal.publication_status = source.id !== "manual" && settings.auto_publish !== false && !deal.link_unresolved ? "published" : "draft";
   if (deal.publication_status === "published") deal.published_at = now();
   deal.score = engine.score(deal);
@@ -419,6 +419,7 @@ export async function startFetchAll(_baseUrl?: string, options: { wait?: boolean
     };
     await Promise.all(Array.from({ length: Math.min(4, Math.max(1, sources.length)) }, worker));
     await saveMissingDealImages().catch((e) => console.warn("image backfill failed", e?.message));
+    await fixLeakedLinks().catch((e) => console.warn("link cleanup failed", e?.message));
     return { fetched, new_deals: newDeals, errors };
   })().finally(() => { scanRunning = false; });
   if (!options.wait) return { queued: true, sources: sources.length };
@@ -437,7 +438,8 @@ const DEAL_COLS = "id,title,text,note,url,clean_url,affiliate_url,converted,stor
 
 const ilikeSafe = (q: string) => q.replace(/[%_,()*\\"]/g, " ").trim();
 
-const withSavedImages = (rows: any[]) => rows.map(({ image_saved_at, ...d }) => ({ ...d, image: savedImageUrl({ ...d, image_saved_at }) }));
+const normalLink = (d: any) => d.converted && d.affiliate_url ? d.affiliate_url : engine.stripAffiliate(d.clean_url || d.affiliate_url || d.url || "");
+const withSavedImages = (rows: any[]) => rows.map(({ image_saved_at, ...d }) => ({ ...d, affiliate_url: normalLink(d), image: savedImageUrl({ ...d, image_saved_at }) }));
 
 export async function listDeals(p: any) {
   const db = await getDb();
@@ -582,7 +584,7 @@ export async function goDeal(id: string) {
   const db = await getDb();
   const d = await check(await db.from("deals").select("*").eq("id", id).eq("publication_status", "published").maybeSingle());
   if (!d) throw new HttpError(404, "Deal not found");
-  return previewHtml(d.affiliate_url || d.url, d.title, d.image, d.price, d.mrp, d.store);
+  return previewHtml(normalLink(d), d.title, d.image, d.price, d.mrp, d.store);
 }
 
 export async function goLink(code: string) {
@@ -981,11 +983,30 @@ export async function setLinkImage(code: string, image: string) {
   return { ok: true };
 }
 
+const leaked = (u: string) => engine.isShortLink(u || "") || engine.isDealSite(u || "");
+async function recleanDeal(db: any, d: any) {
+  const clean = await engine.cleanLink(d.clean_url);
+  const bad = leaked(clean);
+  await db.from("deals").update(bad ? { clean_url: clean, publication_status: "draft", link_unresolved: true } : { clean_url: clean, affiliate_url: clean, converted: false, store: engine.detectStore(clean) }).eq("id", d.id);
+  return bad ? null : clean;
+}
+
+/** Published deals whose link is still another affiliate's short link get re-cleaned, or moved to Draft. */
+export async function fixLeakedLinks() {
+  const db = await getDb();
+  const rows = await check(await db.from("deals").select("id,clean_url,converted").eq("publication_status", "published").gte("posted_at", ago(2 * 86400e3)).limit(500));
+  for (const d of rows.filter((r) => !r.converted && leaked(r.clean_url)).slice(0, 25)) await recleanDeal(db, d);
+}
+
 export async function reconvert() {
   const db = await getDb();
   const s = await getSettings();
   const rows = await check(await db.from("deals").select("id,clean_url,converted,store").gte("posted_at", ago(86400e3)).order("posted_at", { ascending: false }).limit(200));
   for (const d of rows) {
+    if (leaked(d.clean_url)) {
+      d.clean_url = await recleanDeal(db, d);
+      if (!d.clean_url) continue;
+    }
     const aff = await safeConvert(d.clean_url, s);
     if (aff !== d.clean_url || s.convert_enabled === false || engine.affiliateRoute(engine.detectStore(d.clean_url), s) === "original") await db.from("deals").update({ affiliate_url: aff, converted: aff !== d.clean_url }).eq("id", d.id);
   }

@@ -17,7 +17,7 @@ const GIFT_RE = /gift\s*cards?|e-?gift|vouchers?|\bgv\b/i;
 const LOOT_RE = /\bloot\b|price\s*(?:error|bug|mistake|glitch)|\bbug\s*deal|glitch/i;
 
 export const STORES: Record<string, string[]> = {
-  Flipkart: ["flipkart.com", "fkrt.it", "fkrt.cc", "fkrt.co", "fktr.in"],
+  Flipkart: ["flipkart.com", "fkrt.it", "fkrt.cc", "fkrt.co", "fkrt.site", "fkrt.", "fktr.in"],
   Amazon: ["amazon.in", "amzn.to", "amzn.in", "amazon.com", "amzn.eu"],
   Myntra: ["myntra.com", "myntr.it"],
   Ajio: ["ajio.com", "ajiio.in"],
@@ -447,7 +447,7 @@ export async function fetchWeb(url: string) {
   throw new Error("Unsupported website. Supported: desidime.com, dealsmagnet.com (others: add their Telegram or RSS feed)");
 }
 
-const SHORT_DOMAINS = ["visit.desidime.com", "fkrt.it", "fkrt.cc", "fkrt.co", "fktr.in", "dl.flipkart.com/s/", "amzn.to", "amzn.in", "amzn.eu",
+const SHORT_DOMAINS = ["visit.desidime.com", "fkrt.it", "fkrt.cc", "fkrt.co", "fkrt.site", "fkrt.", "fktr.in", "dl.flipkart.com/s/", "amzn.to", "amzn.in", "amzn.eu",
   "myntr.it", "ajiio.in", "bit.ly", "tinyurl.com", "ekaro.in", "linkredirect.in", "extp.in", "bitli.in",
   "cutt.ly", "wishlink.com", "inr.deals", "clnk.in", "earnkaro.com", "t.co/", "rebrand.ly", "shrsl.com", "sankmo", "ddime.in", "fas.st", "s.click", "tiny.cc", "goo.gl", "amzn-to.co", "amznn.cc", "fkrt.to", "cuelinks.com", "/s/", "bitly", "shorturl", "redirect"];
 const WRAP_KEYS = ["dl", "url", "u", "link", "redirect", "redirect_url", "target", "r", "ulp"];

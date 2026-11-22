@@ -86,7 +86,7 @@ export const DealCard = ({ deal, index = 0, onChange }) => {
           {admin ? `${deal.source} · ` : ""}posted {timeAgo(deal.posted_at || deal.created_at)}
         </p>
         <VoteButtons deal={deal} />
-        {admin && <p data-testid={`deal-disclosure-${deal.id}`} className="text-[11px] font-semibold text-slate-600">{deal.converted ? "Converted link" : "Retailer link (not converted)"}</p>}
+        {admin && <p data-testid={`deal-disclosure-${deal.id}`} className="text-[11px] font-semibold text-slate-600">{deal.converted ? "Converted link" : "Normal link"}</p>}
         <div className="mt-auto flex gap-1.5 pt-1">
           <a href={link} target="_blank" rel="sponsored noopener noreferrer" data-testid={`grab-deal-button-${deal.id}`}
             className="flex min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl bg-slate-900 py-2.5 text-sm font-bold text-white transition-colors hover:bg-[#FF5A1F]">
