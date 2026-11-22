@@ -661,13 +661,13 @@ export function converterChain(settings: any, preferred?: string) {
   return order.filter((k) => CONVERTERS[k][2](settings));
 }
 
-async function runChain(url: string, settings: any, chain: string[]) {
+async function runChain(url: string, settings: any, chain: string[], used?: { service?: string }) {
   if (!chain.length) throw new Error("Add your ExtraPe access token or another converter chosen in this store's route in Affiliate Setup.");
   const errors: string[] = [];
   for (const key of chain) {
     if (key === "original") return url;
     const [name, fn] = key === "amazon" ? ["Amazon.in", (u, s) => amazonAffiliate(u, s.amazon_tag)] : CONVERTERS[key];
-    try { return await fn(url, settings); } catch (e) {
+    try { const out = await fn(url, settings); if (used) used.service = name; return out; } catch (e) {
       const msg = e?.message || `${name} conversion failed`;
       void import("./telegram-converter.server").then((t) => t.alertIfKeyFailed(msg)).catch(() => {});
       errors.push(errors.length && !msg.startsWith(name) ? `${name} backup: ${msg}` : msg);
@@ -735,14 +735,17 @@ export async function testConverterKeys(settings: any) {
   }));
 }
 
-export async function convertLink(url: string, settings: any) {
+export async function convertLink(url: string, settings: any, used?: { service?: string }) {
   if (settings.convert_enabled === false || isDealSite(url)) return url;
   const store = detectStore(url);
   if (OFFER_STORES.includes(store)) return url;
-  const chain = routeForStore(settings, store);
+  let chain = routeForStore(settings, store);
   if (chain[0] === "original") return url;
+  // The Telegram bot can put one converter first; the others stay as backup.
+  const first = settings.force_service;
+  if (first && first in CONVERTERS && !(store === "Amazon" && first === "sankmo")) chain = [first, ...chain.filter((k: string) => k !== first)];
   const usable = chain.filter((k: string) => k === "amazon" ? store === "Amazon" : k in CONVERTERS && CONVERTERS[k][2](settings));
-  return runChain(url, settings, usable);
+  return runChain(url, settings, usable, used);
 }
 
 async function convertWithEarnKaro(url: string, settings: any) {
@@ -843,7 +846,8 @@ export function productKey(url: string) {
   if (!p) return (url || "").toLowerCase();
   let m = p.pathname.match(/\/dp\/([A-Z0-9]{10})/);
   if (m) return `amazon:${m[1]}`;
-  const pid = p.searchParams.get("pid");
+  // A Flipkart listing id is "LST" + the 16-character product id + a seller code, so links without pid still match.
+  const pid = p.searchParams.get("pid") || p.searchParams.get("lid")?.match(/^LST([A-Z0-9]{16})/)?.[1];
   if (p.host.includes("flipkart.") && pid) return `flipkart:${pid}`;
   m = p.pathname.match(/\/(itm[a-z0-9]+)/);
   if (m) return `flipkart:${m[1]}`;

@@ -8,7 +8,7 @@ import { BOT_COMMANDS, BOT_HELP } from "../lib/bot-commands";
 
 const tokenSchema = z.string().regex(/^\d{5,20}:[A-Za-z0-9_-]{20,100}$/, "Enter the bot token from BotFather");
 const entity = z.object({ type: z.string().max(40), offset: z.number().int().min(0), length: z.number().int().min(0), url: z.string().url().max(4096).optional() }).passthrough();
-const messageSchema = z.object({ message_id: z.number().int(), chat: z.object({ id: z.number().int(), type: z.enum(["private", "group", "supergroup", "channel"]) }), from: z.object({ is_bot: z.boolean().optional() }).passthrough().optional(), text: z.string().max(4096).optional(), caption: z.string().max(1024).optional(), entities: z.array(entity).max(100).optional(), caption_entities: z.array(entity).max(100).optional() }).passthrough();
+const messageSchema = z.object({ message_id: z.number().int(), chat: z.object({ id: z.number().int(), type: z.enum(["private", "group", "supergroup", "channel"]) }).passthrough(), from: z.object({ is_bot: z.boolean().optional() }).passthrough().optional(), text: z.string().max(4096).optional(), caption: z.string().max(1024).optional(), entities: z.array(entity).max(100).optional(), caption_entities: z.array(entity).max(100).optional() }).passthrough();
 const updateSchema = z.object({ update_id: z.number().int().min(0), message: messageSchema.optional(), channel_post: messageSchema.optional() }).passthrough();
 
 function sign(value: string) {
@@ -57,6 +57,8 @@ const PLAIN_START = /^\/start(?:@\w+)?$/i;
 const EXTRAPE_KEY_ERROR = /ExtraPe access token expired or invalid|Add your ExtraPe access token/i;
 const botId = (token: string) => token.split(":")[0];
 const STATUS = /^\/status(?:@\w+)?$/i;
+const STYLE = /^\/style(?:@\w+)?(?:\s+(\S+))?$/i;
+const chatName = (chat: any) => String(chat.title || (chat.username ? `@${chat.username}` : "") || [chat.first_name, chat.last_name].filter(Boolean).join(" ") || "").slice(0, 120) || null;
 
 /** Text for /status: live converter key checks plus each feed's last health check. */
 export async function statusReport(settings: any) {
@@ -163,7 +165,7 @@ export async function converterStatus() {
   if (!settings.telegram_converter_token) return { connected: false, chats: [] };
   const info = await telegramCall(settings.telegram_converter_token, "getWebhookInfo", {});
   const db = await mongo();
-  const chats = await db.collection("telegram_converter_chats").find({ bot: settings.telegram_converter_token.split(":")[0] }, { projection: { _id: 0, chat_id: 1, type: 1 } }).toArray();
+  const chats = await db.collection("telegram_converter_chats").find({ bot: settings.telegram_converter_token.split(":")[0] }, { projection: { _id: 0, chat_id: 1, type: 1, title: 1 } }).toArray();
   return { connected: !!info.url, webhook_url: info.url, pending: info.pending_update_count, error: info.last_error_message || null, chats, pairing_code: pairingCode(settings.telegram_converter_token) };
 }
 
@@ -191,6 +193,7 @@ async function claimProducts(db: any, keys: string[], windowMs: number) {
   return got.filter((k): k is string => !!k);
 }
 
+let indexed = false;
 /** Lets tests wait for the post-reply work. */
 export let lastBackground: Promise<void> = Promise.resolve();
 
@@ -202,7 +205,8 @@ export async function receiveConverter(request: Request, body: unknown) {
   if (!parsed.success) return Response.json({ detail: "Invalid Telegram update" }, { status: 400 });
   const update = parsed.data;
   const msg = update.message || update.channel_post;
-  if (!msg || msg.from?.is_bot) return Response.json({ ok: true });
+  // Anonymous group admins and "post as channel" arrive under a Telegram service bot name; they are real people.
+  if (!msg || (msg.from?.is_bot && !(msg as any).sender_chat)) return Response.json({ ok: true });
   const text = msg.text ?? msg.caption ?? "";
   const bot = token.split(":")[0];
   const db = await mongo();
@@ -218,7 +222,7 @@ export async function receiveConverter(request: Request, body: unknown) {
   }
   const pair = text.match(/^\/(?:start|connect)(?:@\w+)?\s+(\S+)$/);
   if (RADHE.test(text.trim()) || (pair?.[1] && validPairing(pair[1], token))) {
-    await chats.updateOne({ _id: chatKey as any }, { $set: { bot, chat_id: String(msg.chat.id), type: msg.chat.type, connected_at: new Date().toISOString() } }, { upsert: true });
+    await chats.updateOne({ _id: chatKey as any }, { $set: { bot, chat_id: String(msg.chat.id), type: msg.chat.type, title: chatName(msg.chat), connected_at: new Date().toISOString() } }, { upsert: true });
     if (msg.chat.type !== "channel") await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: "✅ Connected. Radhe Radhe! Send your links or deal text here and I'll reply with your affiliate links." }).catch((e) => console.error("connect reply failed", e.message));
     return Response.json({ ok: true });
   }
@@ -229,6 +233,13 @@ export async function receiveConverter(request: Request, body: unknown) {
   // Unknown chats cannot use the owner's paid affiliate credentials.
   if (!connected) return Response.json({ ok: true });
   if (STATUS.test(text.trim()) && msg.chat.type !== "channel") return Response.json({ method: "sendMessage", chat_id: msg.chat.id, text: await statusReport(settings) });
+  const style = text.trim().match(STYLE);
+  if (style && msg.chat.type === "private") {
+    const want = ({ label: "store", store: "store", name: "store", link: "link", url: "link", https: "link" } as Record<string, string>)[(style[1] || "").toLowerCase()];
+    if (want) await db.collection("settings").updateOne({ id: "main" }, { $set: { converter_label_style: want } });
+    const now = want || settings.converter_label_style || "store";
+    return Response.json({ method: "sendMessage", chat_id: msg.chat.id, text: `${want ? "✅ Saved. " : ""}Converted links are shown as ${now === "link" ? "the plain link (https://fkrt.co/...)" : "the store name (@Flipkart)"}.\n\nTo change: /style label  or  /style link` });
+  }
   const updates = db.collection("telegram_converter_updates");
   const key = `${bot}:${update.update_id}`;
   const existing = await updates.findOne({ _id: key });
@@ -248,7 +259,10 @@ export async function receiveConverter(request: Request, body: unknown) {
   const messageAt = typeof (msg as any).date === "number" ? (msg as any).date * 1000 : receivedAt;
   let claimed: string[] = [];
   try {
-    const result = await convertAffiliateText(text, settings, msg.entities || msg.caption_entities || []);
+    const service = settings.converter_bot_service;
+    const logs = db.collection("converter_logs");
+    const known = (url: string) => logs.findOne({ converted: url, status: "converted" }, { projection: { _id: 0, cleaned: 1 } });
+    const result = await convertAffiliateText(text, service && service !== "auto" ? { ...settings, force_service: service } : settings, msg.entities || msg.caption_entities || [], known);
     const failed = result.items.filter((i) => i.error);
     const changed = result.items.some((i) => i.changed && !i.error);
     const own = result.items.some((i: any) => i.own || i.keep_clean);
@@ -262,7 +276,7 @@ export async function receiveConverter(request: Request, body: unknown) {
       if (keys.length && !claimed.length && (direct || await telegramCall(token, "deleteMessage", { chat_id: msg.chat.id, message_id: msg.message_id }).then(() => true, () => false))) {
         await updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } });
         const at = new Date().toISOString();
-        lastBackground = db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, store: i.store, original: i.original, cleaned: i.cleaned, converted: null,
+        lastBackground = db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, chat_title: chatName(msg.chat), service: i.service || null, own: !!i.own, store: i.store, original: i.original, cleaned: i.cleaned, converted: null,
           status: "repeat", error: `Same product was already posted in this chat in the last ${repeatMinutes} min`, message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: at, convert_ms: Date.now() - receivedAt, total_ms: Math.max(0, Date.now() - messageAt) }))).then(() => {}, (e: any) => console.error("repeat log failed", e?.message));
         return Response.json({ ok: true });
       }
@@ -289,10 +303,12 @@ export async function receiveConverter(request: Request, body: unknown) {
     lastBackground = (async () => {
       if (!result.items.length) return;
       if (direct && changed && failed.length) await telegramCall(token, "sendMessage", { chat_id: msg.chat.id, text: `${failed.length} link(s) could not be converted and were removed: ${[...new Set(failed.map((i) => i.error))].join("; ").slice(0, 3000)}` }).catch(() => {});
-      await db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, store: i.store, original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted,
+      await db.collection("converter_logs").insertMany(result.items.map((i: any) => ({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, chat_title: chatName(msg.chat), service: i.service || null, own: !!i.own, store: i.store, original: i.original, cleaned: i.cleaned, converted: i.error ? null : i.converted,
         status: i.error ? "failed" : i.changed ? "converted" : "unchanged", error: i.error || (!i.changed && !i.own ? "Not a convertible shop link; removed" : null), message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: new Date(repliedAt).toISOString(),
         convert_ms: repliedAt - receivedAt, total_ms: Math.max(0, repliedAt - messageAt) })));
       if (claimed.length) await db.collection("converter_products").deleteMany({ at: { $lt: Date.now() - 8 * 86400_000 } }).catch(() => {});
+      await chats.updateOne({ _id: chatKey as any, title: { $ne: chatName(msg.chat) } }, { $set: { title: chatName(msg.chat) } }).catch(() => {});
+      if (!indexed) { indexed = true; await logs.createIndex({ converted: 1 }).catch(() => {}); }
       for (const i of result.items) await alertIfKeyFailed(i.error);
       for (const item of result.items) {
         if (item.error || !item.changed) continue;

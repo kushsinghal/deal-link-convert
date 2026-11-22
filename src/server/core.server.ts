@@ -39,7 +39,7 @@ const DEFAULT_SETTINGS = {
   bot_tweets_enabled: true, bot_tweets_public: true, bot_tweets_count: 7,
   check_interval_minutes: 5, check_interval_seconds: 300, post_style: "simple", max_posts_per_update: 20,
   website_max_age_hours: 24, telegram_max_age_minutes: 60, last_run_at: null,
-  copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_repeat_minutes: 5, converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
+  copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_repeat_minutes: 5, converter_bot_service: "auto", converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
 };
 
 async function check(res: any) {
@@ -247,6 +247,8 @@ async function ingest(parsed: any, source: any, settings: any, autopost: boolean
     }
     const res = await Promise.all(checks);
     if (res.some((r) => r.data?.length)) return null;
+    // Two sources scanned at the same moment both pass the checks above; only the first may save the product.
+    if (deal.product_key && (await db.from("seen").insert({ key: `p:${deal.product_key}:${deal.price ?? ""}:${now().slice(0, 10)}`, at: now() })).error) return null;
   }
   if (deal.split) await fillSplitInfo(deal);
   if (!deal.image && !deal.clean_url.includes("flipkart")) deal.image = await engine.fetchOgImage(deal.clean_url);
@@ -831,6 +833,7 @@ export async function writeSettings(body: any) {
   }
   if (upd.telegram_converter_token === "") delete upd.telegram_converter_token;
   if ("converter_order" in upd && (!Array.isArray(upd.converter_order) || [...upd.converter_order].sort().join() !== [...engine.DEFAULT_CONVERTER_ORDER].sort().join())) throw new HttpError(400, "Converter order must list ExtraPe, EarnKaro and Sankmo once each");
+  if ("converter_bot_service" in upd && !["auto", ...engine.DEFAULT_CONVERTER_ORDER].includes(upd.converter_bot_service)) throw new HttpError(400, "Pick Automatic, ExtraPe, EarnKaro or Sankmo");
   if ("converter_label_style" in upd && !(["store", "link"] as string[]).includes(upd.converter_label_style)) throw new HttpError(400, "Label style must be store or link");
   if ("telegram_converter_token" in upd) {
     upd.telegram_converter_token = String(upd.telegram_converter_token).trim();

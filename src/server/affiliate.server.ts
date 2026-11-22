@@ -8,15 +8,21 @@ function isOwnAffiliateLink(url: string, settings: any) {
   return !!tag && ["amazon.in", "www.amazon.in"].includes(host) && p.searchParams.get("tag") === tag && engine.affiliateRoute("Amazon", settings) === "amazon";
 }
 
-export async function convertAffiliate(original: string, settings: any, fast = false) {
+export type KnownLink = (url: string) => Promise<{ cleaned?: string } | null>;
+
+export async function convertAffiliate(original: string, settings: any, fast = false, known?: KnownLink) {
   if (isOwnAffiliateLink(original, settings)) {
     return { original, cleaned: original, converted: original, changed: false, error: null as string | null, store: engine.detectStore(original), own: true };
   }
+  // A link this bot made earlier is already yours: it is kept, not converted a second time.
+  const prior = known ? await known(original).catch(() => null) : null;
+  if (prior?.cleaned) return { original, cleaned: prior.cleaned, converted: original, changed: false, error: null as string | null, store: engine.detectStore(prior.cleaned), own: true };
   const cleaned = await engine.cleanLink(original, fast);
+  const used: { service?: string } = {};
   try {
-    const converted = await engine.convertLink(cleaned, settings);
+    const converted = await engine.convertLink(cleaned, settings, used);
     const keepClean = settings.convert_enabled === false || engine.affiliateRoute(engine.detectStore(cleaned), settings) === "original";
-    return { original, cleaned, converted, changed: converted !== cleaned, keep_clean: keepClean, error: null as string | null, store: engine.detectStore(cleaned) };
+    return { original, cleaned, converted, changed: converted !== cleaned, keep_clean: keepClean, error: null as string | null, store: engine.detectStore(cleaned), service: used.service };
   } catch (error) {
     const store = engine.detectStore(cleaned);
     // Links to sites that are not shops (news, social, blogs) are simply left as they are.
@@ -32,7 +38,7 @@ type Replacement = { start: number; end: number; newStart: number; newEnd: numbe
 const linkLabel = (store: string) => `@${(store && store !== "Other" ? store : "Link").replace(/\s+/g, "")}`;
 
 /** Telegram offsets and JavaScript slices both use UTF-16 code units. */
-export async function convertAffiliateText(text: string, settings: any, entities: Entity[] = []) {
+export async function convertAffiliateText(text: string, settings: any, entities: Entity[] = [], known?: KnownLink) {
   const spans: Span[] = [...text.matchAll(/https?:\/\/[^\s<>"')\]]+/g)].map((m) => {
     const url = m[0].replace(/[.,;!]+$/, "");
     return { start: m.index!, end: m.index! + url.length, url, raw: url };
@@ -51,7 +57,7 @@ export async function convertAffiliateText(text: string, settings: any, entities
     const host = new URL(url).hostname;
     if (/^(?:[^.]+\.)?(?:x\.com|twitter\.com|t\.me|telegram\.me|facebook\.com|instagram\.com|youtube\.com|youtu\.be|wa\.me|whatsapp\.com)$/.test(host))
       return Promise.resolve({ original: url, cleaned: url, converted: url, changed: false, error: null, store: "Other", unsupported: true });
-    return convertAffiliate(url, settings, true);
+    return convertAffiliate(url, settings, true, known);
   }));
   const byUrl = new Map(items.map((i) => [i.original, i]));
 

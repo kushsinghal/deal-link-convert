@@ -77,6 +77,10 @@ export const DealsTab = () => {
   return (
     <Panel testid="admin-deals-panel" title="Review queue" desc="Fetched deals are published automatically when that rule is on. Use “Save as draft” to unpublish a deal, or add your own buying advice before publishing.">
       <ScanStatus />
+      <Button size="sm" className={`${ghostBtn} mb-3`} data-testid="admin-remove-duplicates" onClick={async () => {
+        if (!window.confirm("Delete later copies of the same product at the same price (saved within 2 days of the first one)?")) return;
+        try { const { data } = await api.post("/deals/remove-duplicates", {}); toast.success(data.removed ? `${data.removed} duplicate deal(s) removed` : "No duplicate deals found"); load(); } catch (e) { toast.error(errMsg(e)); }
+      }}><Trash2 className="mr-2 h-4 w-4" />Remove duplicate deals</Button>
       <div className="mb-4 flex flex-wrap gap-2">
         {TABS.map((t) => (
           <button key={t} data-testid={`admin-store-tab-${t.toLowerCase()}`} onClick={() => setTab(t)}

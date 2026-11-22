@@ -20,6 +20,10 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
   async function setRepeat(minutes: number) {
     try { await api.put("/settings", { converter_repeat_minutes: minutes }); reload(); toast.success("Repeat check saved"); } catch (error) { toast.error(errMsg(error)); }
   }
+  const botService = settings.converter_bot_service || "auto";
+  async function setBotService(value: string) {
+    try { await api.put("/settings", { converter_bot_service: value }); reload(); toast.success("Bot converter saved"); } catch (error) { toast.error(errMsg(error)); }
+  }
   async function setLabelStyle(style: "store" | "link") {
     try { await api.put("/settings", { converter_label_style: style }); reload(); } catch (error) { toast.error(errMsg(error)); }
   }
@@ -54,7 +58,7 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
       <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-600">
         <li>Create a bot with @BotFather and paste its token below.</li>
         <li>Connect the bot using your live site address.</li>
-        <li>In your chat with the bot (or a group where it is added), send <b>/Radhe</b>. The bot replies "Connected" — no code or website visit needed.</li>
+        <li>In your chat with the bot send <b>/Radhe</b>. In a group send <b>/radhe@{username || "yourbot"}</b> (the bot must be an admin of the group); in a channel post <b>/Radhe</b>. The bot replies "Connected" in chats and groups; in channels it connects silently.</li>
       </ol>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2"><Label htmlFor="converter-token">Bot token {saved ? "· saved" : ""}</Label>
@@ -72,8 +76,16 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
         <Label>Or use this one-time command (expires in 15 minutes)</Label>
         <Input data-testid="telegram-pairing-command" readOnly aria-label="Telegram connection command" value={`/connect ${status.pairing_code}`} className="font-mono text-xs" />
       </div>}
-      {status?.chats && <p data-testid="telegram-connected-chats" className="break-words text-sm text-slate-600">Connected chats: {status.chats.length ? status.chats.map((c: any) => `${c.type} ${c.chat_id}`).join(", ") : "None"}</p>}
+      {status?.chats && <p data-testid="telegram-connected-chats" className="break-words text-sm text-slate-600">Connected chats: {status.chats.length ? status.chats.map((c: any) => `${c.title || c.chat_id} (${c.type})`).join(", ") : "None"}</p>}
       {status?.error && <p data-testid="telegram-connection-error" role="alert" className="text-sm text-destructive">{status.error}</p>}
+      <div className="space-y-2 border-t border-slate-200 pt-4">
+        <Label htmlFor="converter-bot-service">Converter the bot uses</Label>
+        <select id="converter-bot-service" data-testid="converter-bot-service-select" value={botService} onChange={(e) => setBotService(e.target.value)}
+          className="block h-9 rounded-xl border border-slate-300 bg-white px-3 text-sm text-slate-800">
+          {[["auto", "Automatic (your store order)"], ["extrape", "ExtraPe first"], ["earnkaro", "EarnKaro first"], ["sankmo", "Sankmo first"]].map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+        </select>
+        <p className="text-xs text-slate-500">Only for links sent to the Telegram bot. The chosen converter is tried first; your other converters are used as backup if it fails. Converter History shows which one made each link.</p>
+      </div>
       <div className="space-y-2 border-t border-slate-200 pt-4">
         <Label htmlFor="converter-repeat">Skip the same product in the same channel</Label>
         <select id="converter-repeat" data-testid="converter-repeat-select" value={repeatMinutes} onChange={(e) => setRepeat(Number(e.target.value))}
@@ -94,7 +106,7 @@ export function TelegramConverterPanel({ settings, reload }: { settings: any; re
         <p data-testid="telegram-converter-preview" className="rounded-xl bg-[#F5F2EA] p-3 text-sm text-slate-800">
           Deal price ₹399 at <a data-testid="telegram-preview-link" href="https://www.flipkart.com/" className="font-semibold text-sky-700 underline" onClick={(e) => e.preventDefault()}>{labelStyle === "link" ? "https://fkrt.cc/your-link" : "@Flipkart"}</a>
         </p>
-        <p className="text-xs text-slate-500">{labelStyle === "link" ? "The converted link is shown as the clickable text." : "Store names become clickable links to your affiliate page."} Your links are never shown as raw text.</p>
+        <p className="text-xs text-slate-500">{labelStyle === "link" ? "The converted link is shown as the clickable text." : "Store names become clickable links to your affiliate page."} Your links are never shown as raw text. You can also switch this from your private chat with the bot: send <b>/style label</b> or <b>/style link</b>.</p>
       </div>
     </section>
   );

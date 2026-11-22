@@ -138,6 +138,7 @@ export async function handle(request: Request, splat: string) {
         return result ? json(result) : json({ detail: "Source not found" }, 404);
       }
       if (a === "deals" && b === "reconvert") return json(await core.reconvert());
+      if (a === "deals" && b === "remove-duplicates") return json(await (await import("./review.server")).removeDuplicateDeals());
       if (a === "deals" && !b) return json(await core.addDeal(body));
       if (a === "deals" && b && c === "post") return json(await core.repost(b, qp("destination_id")));
       if (a === "sources" && !b) return json(await core.addSource(body));

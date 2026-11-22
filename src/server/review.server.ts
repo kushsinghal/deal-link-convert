@@ -25,3 +25,17 @@ export async function saveReview(id: string, body: any) {
   }
   return result.matchedCount > 0;
 }
+/** Deletes later copies of the same product at the same price saved within 2 days of the first one. */
+export async function removeDuplicateDeals() {
+  const col = (await mongo()).collection("deals");
+  const rows = await col.find({ product_key: { $nin: [null, ""] } }, { projection: { _id: 0, id: 1, product_key: 1, price: 1, created_at: 1, featured: 1 } }).sort({ created_at: 1 }).toArray();
+  const kept = new Map<string, number>();
+  const drop: string[] = [];
+  for (const d of rows as any[]) {
+    const key = `${d.product_key}|${d.price ?? ""}`, at = Date.parse(d.created_at), first = kept.get(key);
+    if (first !== undefined && at - first <= 2 * 86400e3 && !d.featured) drop.push(d.id);
+    else kept.set(key, at);
+  }
+  if (drop.length) await col.deleteMany({ id: { $in: drop } });
+  return { removed: drop.length };
+}
