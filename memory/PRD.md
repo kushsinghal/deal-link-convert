@@ -236,3 +236,8 @@
 - Destinations now get an id on create (+ legacy repair on list) — fixes "can't select/test new bot".
 - Status last_sent: delivery / opening link / convert+repeat / posting / our part (processing_ms).
 - vitest 168/168, tsc clean. Testing iteration_2: fixed 014, 066, 070, 073 (+011, 024). NOT verified live: account posting, real timings, ExtraPe accepting fkrt.co directly.
+
+## 2026-06 — Live check: reader "Not connected" on Render
+- Live API check: code deployed (reader/status exists, reader_post_bot account, converter bot now @xtelgobot) but NO Telegram user login saved on live (sankmo-bot/status connected:false). Reader cannot start without it. Live send-code attempt by agent returned generic error (likely SEND_CODE_UNAVAILABLE after ~5 code requests today) — user must log in themselves later in Affiliate Setup → Keys & logins → Sankmo via Telegram.
+- Fixes (preview, need GitHub push + Render redeploy): loginError shows Telegram's real reason; reader/status has has_login + login error; ReaderTab verdict line "Working / Not working: reason"; login error cleared after connecting; failed source retried every 60 s; unreachable channel retried even when other channel already posted. vitest 168/168, tsc clean. Testing iteration_3: fixed 099, 109, 066, 098.
+- Where to see: Channel Reader tab (verdict, last read/sent + timing line), Converter History (rows "Reader: source → channel" with delivery/opening/converter/Telegram/total).

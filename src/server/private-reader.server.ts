@@ -23,6 +23,7 @@ let handler: ((e: any) => void) | null = null;
 let poller: ReturnType<typeof setInterval> | null = null;
 let starting: Promise<void> | null = null;
 let checkedAt = 0;
+let attachedAt = 0;
 const seen = new Map<string, number>();
 const destIds = new Map<string, string>();
 
@@ -108,14 +109,17 @@ async function attach(c: any) {
   c.addEventHandler(handler, event);
   c._readerEvent = event;
   attached = c;
+  attachedAt = Date.now();
   state.connected = true;
+  if (state.last_error?.where === "login") state.last_error = null;
 }
 
 /** Safety net: Telegram sometimes stops pushing a busy channel to a user account; this picks up anything missed. */
 async function tick() {
   try {
     const c = await (await import("./sankmo-bot.server")).getClient();
-    if (c !== attached) await attach(c);
+    // A source that could not be opened at start (network, Telegram hiccup) is tried again every minute.
+    if (c !== attached || (state.sources.some((x) => !x.ok) && Date.now() - attachedAt > 60_000)) await attach(c);
     state.connected = !!c.connected;
     for (const src of sources) {
       const msgs = await c.getMessages(src.entity, { limit: 10, minId: src.lastId });
@@ -303,6 +307,7 @@ async function handle(src: Source, m: any, via: string, receivedAt: number, mess
   const wanted = plan.filter((c) => c.items.length);
   if (!wanted.length) {
     await conv.releaseProducts(db, lost);
+    if (unreachable) throw new Retry("A destination channel could not be reached");
     const repeat = claims.length && claims.every((c) => !c.fresh.length);
     await log(repeat
       ? claims.map((c) => ({ chat_id: c.id, chat_title: `Reader: ${src.name} → ${botChat(c.d.chat)}`, store: products[0]?.store, original: products[0]?.original, cleaned: products[0]?.cleaned, converted: null, status: "repeat", error: `Same product was already posted in this channel in the last ${repeatMs / 60_000} min`, service_ms: serviceMs }))

@@ -20,8 +20,18 @@ const Cell = ({ label, testid, children, tone = "" }) => (
   </div>
 );
 
+const verdict = (st) => {
+  if (!st.enabled) return [false, "Not working: the reader is switched off."];
+  if (st.has_login === false) return [false, "Not working: no Telegram login saved. Log in with the spare account in Affiliate Setup → Keys & logins."];
+  if (!st.connected) return [false, st.last_error ? `Not working: ${st.last_error.message}` : "Starting… check again in a few seconds."];
+  const bad = st.sources.filter((x) => !x.ok).map((x) => x.name);
+  if (bad.length) return [false, `Partly working: cannot read ${bad.join(", ")}.`];
+  return [true, `Working: reading ${st.sources.length} channels${st.last_sent ? `, last post sent ${formatKolkata(st.last_sent.at)}` : ", waiting for the next source post"}.`];
+};
+
 const StatusView = ({ st, load }) => (
   <Panel testid="reader-status-panel" title="Reader status" desc="Updates every 5 seconds. Every post the reader handles (sent, repeat, failed) with its timings is listed in Converter History as “Reader: source → channel”." action={<Button data-testid="reader-status-refresh" className={ghostBtn} onClick={load}><RefreshCw className="h-4 w-4" /></Button>}>
+    {(() => { const [ok, text] = verdict(st); return <p data-testid="reader-verdict" className={`mb-4 rounded-xl px-3 py-2 text-sm font-semibold ${ok ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-700"}`}>{text}</p>; })()}
     <div className="grid gap-3 sm:grid-cols-2">
       <Cell label="Connection" testid="reader-connected" tone={st.connected ? "text-emerald-800" : "text-rose-700"}>{st.connected ? `Connected as ${st.user}` : !st.enabled ? "Switched off" : st.has_login === false ? "No Telegram login saved — log in first" : "Connecting…"}</Cell>
       <Cell label="Source channels" testid="reader-sources">{st.sources.length ? st.sources.map((s) => <p key={s.name} className={s.ok ? "text-emerald-800" : "text-rose-700"}>{s.ok ? "✓" : "✗"} {s.name}{s.error ? ` — ${s.error}` : ""}</p>) : "—"}</Cell>
