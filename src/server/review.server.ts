@@ -39,3 +39,17 @@ export async function removeDuplicateDeals() {
   if (drop.length) await col.deleteMany({ id: { $in: drop } });
   return { removed: drop.length };
 }
+
+/** Run from the scheduler tick; does the clean-up at most once an hour. */
+export async function removeDuplicateDealsHourly() {
+  const db = await mongo();
+  try {
+    await db.collection("converter_alerts").updateOne({ _id: "dedupe-hourly" as any, at: { $lte: Date.now() - 3600_000 } }, { $set: { at: Date.now() } }, { upsert: true });
+  } catch (e: any) {
+    if (e?.code === 11000) return { skipped: true };
+    throw e;
+  }
+  const result = await removeDuplicateDeals();
+  if (result.removed) console.log("hourly duplicate clean-up removed", result.removed);
+  return result;
+}

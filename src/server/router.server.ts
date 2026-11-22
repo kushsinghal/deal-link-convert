@@ -69,6 +69,7 @@ export async function handle(request: Request, splat: string) {
       const { verifyCronRequest } = await import("./auth.server");
       if (!verifyCronRequest(request)) return json({ detail: "Unauthorized" }, 401);
       void import("./telegram-converter.server").then((t) => t.checkConverterHealth()).catch((e) => console.error("converter health check failed", e?.message));
+      void import("./review.server").then((r) => r.removeDuplicateDealsHourly()).catch((e) => console.error("duplicate clean-up failed", e?.message));
       const st = await core.getSettings();
       const waitMs = (Number(st.check_interval_seconds) || 300) * 1000 - 20_000 - (Date.now() - new Date(st.last_run_at || 0).getTime());
       if (waitMs > 0) return json({ queued: false, skipped: true, next_in_seconds: Math.ceil(waitMs / 1000) }, 202);

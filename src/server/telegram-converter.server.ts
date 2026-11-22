@@ -318,8 +318,17 @@ export async function receiveConverter(request: Request, body: unknown) {
     // Answering inside the webhook response saves a separate round trip to Telegram.
     return Response.json(reply ? { method: "sendMessage", ...reply } : { ok: true });
   } catch (error) {
-    await updates.updateOne({ _id: key }, { $set: { locked_until: 0 } });
     if (claimed.length) await db.collection("converter_products").deleteMany({ _id: { $in: claimed } as any }).catch(() => {});
+    const detail = String((error as Error)?.message || error).slice(0, 300);
+    // Telegram refusing this exact post (too long, already deleted, not changed) will never succeed on a retry; retrying only blocks the posts behind it.
+    if (/^Telegram \(4(?!29)\d\d\)|Send up to 10 links|too long for Telegram/.test(detail)) {
+      await updates.updateOne({ _id: key }, { $set: { done: true, finished_at: new Date() } });
+      const at = new Date().toISOString();
+      lastBackground = db.collection("converter_logs").insertOne({ id: crypto.randomUUID(), chat_id: String(msg.chat.id), chat_type: msg.chat.type, chat_title: chatName(msg.chat), store: "Other", original: text.match(/https?:\/\/\S+/)?.[0] || text.slice(0, 200), cleaned: null, converted: null,
+        status: "failed", error: `Post left as it was: ${detail}`, message_at: new Date(messageAt).toISOString(), received_at: new Date(receivedAt).toISOString(), replied_at: at, convert_ms: Date.now() - receivedAt, total_ms: Math.max(0, Date.now() - messageAt) }).then(() => {}, () => {});
+      return Response.json(msg.chat.type === "channel" ? { ok: true } : { method: "sendMessage", chat_id: msg.chat.id, text: `Conversion failed: ${detail}` });
+    }
+    await updates.updateOne({ _id: key }, { $set: { locked_until: 0 } });
     throw error;
   }
 }

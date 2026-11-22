@@ -4,11 +4,11 @@ import * as converter from "@/server/telegram-converter.server";
 import { stripAffiliate, isShortLink, productKey } from "@/server/engine.server";
 
 const token = "123456:" + "a".repeat(30);
-const state = vi.hoisted(() => ({ products: new Map<string, number>(), calls: [] as any[], logs: [] as any[], repeat: undefined as number | undefined, deleteOk: true, ekaro: 0, known: {} as Record<string, string>, style: "", service: "" }));
+const state = vi.hoisted(() => ({ products: new Map<string, number>(), calls: [] as any[], logs: [] as any[], repeat: undefined as number | undefined, deleteOk: true, editFail: "", ekaro: 0, known: {} as Record<string, string>, style: "", service: "" }));
 vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: string) => ({
   findOne: async (filter: any) => name === "telegram_converter_chats" ? {} : name === "converter_logs" && state.known[filter?.converted] ? { cleaned: state.known[filter.converted] } : null,
   createIndex: async () => ({}),
-  insertOne: async () => ({}),
+  insertOne: async (row: any) => { if (name === "converter_logs") state.logs.push(row); return {}; },
   insertMany: async (rows: any[]) => { if (name === "converter_logs") state.logs.push(...rows); return {}; },
   find: () => ({ toArray: async () => [] }),
   deleteMany: async (filter: any) => { for (const id of filter._id?.$in || []) state.products.delete(id); return {}; },
@@ -23,7 +23,7 @@ vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: 
 }) }), db: { from: () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { id: "main", telegram_converter_token: "123456:" + "a".repeat(30), earnkaro_token: "configured", ...(state.service ? { converter_bot_service: state.service } : {}), ...(state.repeat === undefined ? {} : { converter_repeat_minutes: state.repeat }) }, error: null }) }) }) }) } }));
 vi.mock("@/server/core.server", async (original) => ({ ...(await original<any>()), publishConversion: async () => ({}) }));
 
-afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); state.products.clear(); state.calls = []; state.logs = []; state.repeat = undefined; state.deleteOk = true; state.ekaro = 0; state.known = {}; state.style = ""; state.service = ""; });
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); state.products.clear(); state.calls = []; state.logs = []; state.repeat = undefined; state.deleteOk = true; state.editFail = ""; state.ekaro = 0; state.known = {}; state.style = ""; state.service = ""; });
 
 let updateId = 1;
 async function post(chatId: number, url: string, type = "channel", extra: any = {}) {
@@ -35,6 +35,7 @@ async function post(chatId: number, url: string, type = "channel", extra: any = 
     if (u.includes("ekaro-api")) return Response.json({ success: 1, data: "https://ekaro.in/mine" });
     const method = u.split("/").pop()!;
     state.calls.push({ method, body: JSON.parse(String(init?.body)) });
+    if (method === "editMessageText" && state.editFail) return Response.json({ ok: false, description: state.editFail }, { status: state.editFail.includes("Too Many") ? 429 : 400 });
     if (method === "deleteMessage" && !state.deleteOk) return Response.json({ ok: false, description: "message can't be deleted" }, { status: 400 });
     return Response.json({ ok: true, result: {} });
   }));
@@ -133,5 +134,21 @@ describe("what happened on the live channel", () => {
     state.style = "";
     await post(-5, "", "group", { raw: "/style link" });
     expect(state.style).toBe("");
+  });
+});
+
+describe("a post Telegram refuses to edit", () => {
+  const a = "https://www.flipkart.com/x/p/itm1?pid=PIDX";
+  it("is logged and answered with ok, so Telegram does not keep re-sending it with a 500 error", async () => {
+    state.editFail = "Bad Request: message is not modified";
+    const r = await post(-1001, a);
+    expect(r.json).toEqual({ ok: true });
+    expect(state.logs.at(-1)).toMatchObject({ status: "failed", chat_id: "-1001" });
+    state.editFail = "";
+    expect((await post(-1001, a)).methods).toEqual(["editMessageText"]);
+  });
+  it("is still retried when Telegram only asks to slow down", async () => {
+    state.editFail = "Too Many Requests: retry after 3";
+    await expect(post(-1001, a)).rejects.toThrow(/429/);
   });
 });
