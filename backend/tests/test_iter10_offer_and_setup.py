@@ -4,7 +4,7 @@ import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://try-it-now-80--6otlj0ca.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://link-converter-bot--8xp2shxu.preview.emergentagent.com").rstrip("/")
 ADMIN_PW = "RadheKrishna@#12"
 OFFER_STORES = ["Paytm", "Swiggy", "Zomato", "Woohoo", "Gyftr"]
 
