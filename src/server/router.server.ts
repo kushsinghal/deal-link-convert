@@ -36,6 +36,8 @@ export async function handle(request: Request, splat: string) {
   const [a, b, c] = parts;
   const route = `${method} ${parts.length ? parts.map((p, i) => (i > 0 && /^[0-9a-f-]{8,}$/i.test(p) && !["d"].includes(p) ? ":id" : p)).join("/") : ""}`;
 
+  // Keeps the channel reader running after a restart; the first request or cron ping starts it.
+  void import("./private-reader.server").then((r) => r.ensureReader()).catch((e) => console.error("reader start failed", e?.message));
   try {
     if (method === "POST" && a === "telegram" && b === "converter" && !c) {
       const { receiveConverter } = await import("./telegram-converter.server");
@@ -105,6 +107,7 @@ export async function handle(request: Request, splat: string) {
       if (c === "disconnect") return json(await telegram.disconnectConverter());
       if (c === "menu") return json(await telegram.syncBotMenu());
     }
+    if (a === "reader" && b === "status" && method === "GET") return json((await import("./private-reader.server")).readerStatus());
     if (a === "sankmo-bot") {
       const bot = await import("./sankmo-bot.server");
       try {

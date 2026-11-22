@@ -213,13 +213,13 @@ function keep(id: string, v: any, exp: number) {
   local.set(id, { v, exp });
 }
 /** Remembered answers: "s:" opened short link, "o:" link the bot made, "c:" affiliate link of a product listing. */
-async function recall(db: any, ids: string[]) {
+export async function recall(db: any, ids: string[]) {
   const out = new Map<string, any>(), now = Date.now();
   const miss = ids.filter((id) => { const hit = local.get(id); if (hit && hit.exp > now) out.set(id, hit.v); return !out.has(id); });
   if (miss.length) for (const row of await db.collection("converter_memory").find({ _id: { $in: miss }, exp: { $gt: new Date(now) } }).toArray()) { out.set(row._id, row.v); keep(row._id, row.v, +new Date(row.exp)); }
   return out;
 }
-async function remember(db: any, entries: [string, any, number][]) {
+export async function remember(db: any, entries: [string, any, number][]) {
   if (!entries.length) return;
   const now = Date.now();
   for (const [id, v, ttl] of entries) keep(id, v, now + ttl);
@@ -238,7 +238,7 @@ export function reuseKey(cleaned: string) {
 }
 
 /** Marks products as posted in one chat; returns the keys that were not posted there inside the window. */
-async function claimProducts(db: any, keys: string[], windowMs: number) {
+export async function claimProducts(db: any, keys: string[], windowMs: number) {
   const at = Date.now();
   // Every product was seen here moments ago by this server: a repeat, no database trip needed.
   if (keys.length && keys.every((k) => (localClaims.get(k) ?? 0) > at - windowMs)) return [];
@@ -254,7 +254,7 @@ async function claimProducts(db: any, keys: string[], windowMs: number) {
   for (const k of fresh) localClaims.set(k, at);
   return fresh;
 }
-async function releaseProducts(db: any, keys: string[]) {
+export async function releaseProducts(db: any, keys: string[]) {
   if (!keys.length) return;
   for (const k of keys) localClaims.delete(k);
   await db.collection("converter_products").deleteMany({ _id: { $in: keys } as any }).catch(() => {});

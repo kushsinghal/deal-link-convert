@@ -4,6 +4,7 @@ import * as engine from "./engine.server";
 import { convertAffiliate } from "./affiliate.server";
 import { normalizeSource } from "./source-input.server";
 import { saveDealImage, saveMissingDealImages, savedImageUrl } from "./deal-images.server";
+import readerConfig from "../../config/private-reader.json";
 
 export class HttpError extends Error {
   status: number;
@@ -40,6 +41,9 @@ const DEFAULT_SETTINGS = {
   check_interval_minutes: 5, check_interval_seconds: 300, post_style: "simple", max_posts_per_update: 20,
   website_max_age_hours: 24, telegram_max_age_minutes: 60, last_run_at: null,
   copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_repeat_minutes: 5, converter_bot_service: "auto", converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
+  reader_enabled: false, reader_caption: readerConfig.caption || "", reader_sources: readerConfig.sources,
+  reader_destinations: readerConfig.destinations.map((chat) => ({ chat, min_price: /deltfetch/i.test(chat) ? 4500 : 0 })),
+  reader_post_bot: "converter", reader_photo: false,
 };
 
 async function check(res: any) {
@@ -851,8 +855,29 @@ export async function writeSettings(body: any) {
   clamp("telegram_max_age_minutes", 1, 10080);
   clamp("max_posts_per_update", 1, 200);
   clamp("converter_repeat_minutes", 5, 60);
+  validateReader(upd);
   await updateSettings(upd);
+  if (Object.keys(upd).some((k) => k.startsWith("reader_"))) void import("./private-reader.server").then((r) => r.restartReader()).catch(() => {});
   return readSettings();
+}
+
+const CHANNEL = /^(?:https?:\/\/)?(?:t\.me\/|@)?([A-Za-z][A-Za-z0-9_]{3,31})$/;
+function validateReader(upd) {
+  for (const k of ["reader_enabled", "reader_photo"]) if (k in upd && typeof upd[k] !== "boolean") throw new HttpError(400, `${k} must be true or false`);
+  if ("reader_caption" in upd) upd.reader_caption = String(upd.reader_caption).slice(0, 500);
+  if ("reader_post_bot" in upd) upd.reader_post_bot = String(upd.reader_post_bot).slice(0, 64) || "converter";
+  if ("reader_sources" in upd) {
+    if (!Array.isArray(upd.reader_sources) || upd.reader_sources.length > 10) throw new HttpError(400, "List up to 10 source channels");
+    upd.reader_sources = upd.reader_sources.map((x) => String(x).trim().match(CHANNEL)?.[1] || (() => { throw new HttpError(400, `Not a channel name: ${x}`); })());
+  }
+  if ("reader_destinations" in upd) {
+    if (!Array.isArray(upd.reader_destinations) || upd.reader_destinations.length > 5) throw new HttpError(400, "List up to 5 destination channels");
+    upd.reader_destinations = upd.reader_destinations.map((d) => {
+      const name = String(d?.chat || "").trim().match(CHANNEL)?.[1];
+      if (!name) throw new HttpError(400, `Not a channel: ${d?.chat}`);
+      return { chat: `https://t.me/${name}`, min_price: Math.max(0, Math.min(10_000_000, Number(d.min_price) || 0)) };
+    });
+  }
 }
 
 export async function convertOne(url: string) {

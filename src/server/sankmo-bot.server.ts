@@ -12,8 +12,17 @@ let idleTimer: ReturnType<typeof setTimeout> | null = null;
 const IDLE_MS = 2 * 60e3;
 
 async function closeClient(c: any) { await c?.destroy?.().catch(() => {}); }
+let held = false;
+/** The channel reader keeps the one Telegram connection open; Sankmo uses the same one. */
+export function holdClient(on: boolean) {
+  held = on;
+  if (on && idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  if (!on) touchClient();
+}
 function touchClient() {
   if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = null;
+  if (held) return;
   idleTimer = setTimeout(() => { const c = client; client = null; idleTimer = null; closeClient(c); }, IDLE_MS);
 }
 
@@ -40,7 +49,7 @@ async function makeClient(session = "") {
   return c;
 }
 
-async function getClient() {
+export async function getClient() {
   touchClient();
   if (client?.connected) return client;
   await closeClient(client);
@@ -126,6 +135,7 @@ export async function verifyLoginCode(code: string, password?: string) {
     const name = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username || "Telegram user";
     await (await settingsCol()).updateOne({ id: "main" }, { $set: { tg_session: seal(c.session.save()), tg_user: name } }, { upsert: true });
     await (await import("./telegram-converter.server")).settingsChanged(["tg_session"]);
+    void import("./private-reader.server").then((r) => r.restartReader()).catch(() => {});
     await (await pendingCol()).updateOne({ _id: "sankmo" as any }, { $unset: { state: "" }, $set: { expires_at: new Date(0) } });
     return { connected: true, user: name };
   } catch (e: any) {
@@ -135,6 +145,7 @@ export async function verifyLoginCode(code: string, password?: string) {
 }
 
 export async function disconnectBot() {
+  await (await import("./private-reader.server")).stopReader().catch(() => {});
   try { const { Api } = await import("telegram"); const c = await getClient(); await c.invoke(new Api.auth.LogOut()); } catch { /* session may already be gone */ }
   await closeClient(client);
   if (idleTimer) clearTimeout(idleTimer);
