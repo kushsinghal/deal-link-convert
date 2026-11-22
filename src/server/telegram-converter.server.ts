@@ -166,7 +166,8 @@ export async function converterStatus() {
   const info = await telegramCall(settings.telegram_converter_token, "getWebhookInfo", {});
   const db = await mongo();
   const chats = await db.collection("telegram_converter_chats").find({ bot: settings.telegram_converter_token.split(":")[0] }, { projection: { _id: 0, chat_id: 1, type: 1, title: 1 } }).toArray();
-  return { connected: !!info.url, webhook_url: info.url, pending: info.pending_update_count, error: info.last_error_message || null, chats, pairing_code: pairingCode(settings.telegram_converter_token) };
+  return { connected: !!info.url, webhook_url: info.url, pending: info.pending_update_count, // Telegram keeps showing its last error forever; only one from the last 10 minutes is a current problem.
+    error: info.last_error_message && (info.pending_update_count > 0 || Date.now() / 1000 - (info.last_error_date || 0) < 600) ? info.last_error_message : null, chats, pairing_code: pairingCode(settings.telegram_converter_token) };
 }
 
 export async function disconnectConverter() {
