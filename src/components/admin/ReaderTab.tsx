@@ -38,16 +38,30 @@ const StatusView = ({ st, load }) => (
       <Cell label="Last post read" testid="reader-last-read">{st.last_read ? `${st.last_read.source} #${st.last_read.message_id} · ${formatKolkata(st.last_read.at)}${st.last_read.title ? ` · ${st.last_read.title}` : ""} · reached the server ${((st.last_read.delivery_ms || 0) / 1000).toFixed(1)}s after posting (${st.last_read.via})` : "None yet"}</Cell>
       <Cell label="Last post sent" testid="reader-last-sent">{st.last_sent ? `${st.last_sent.to.join(", ")} · ${formatKolkata(st.last_sent.at)}${secs(st.last_sent.total_ms)}${st.last_sent.by ? ` · by ${st.last_sent.by}` : ""}` : "None yet"}
         {st.last_sent?.processing_ms != null && <p data-testid="reader-last-timing" className="mt-1 font-mono text-[11px] text-slate-600">Telegram delivery {s1(st.last_sent.delivery_ms)} · opening link {s1(st.last_sent.open_ms)} · convert + repeat check {s1(st.last_sent.convert_ms)} · posting {s1(st.last_sent.send_ms)} · our part {s1(st.last_sent.processing_ms)}</p>}</Cell>
+      <Cell label="Links prepared in advance" testid="reader-prepared">{st.prepared ? `${st.prepared.new_links} new ready links for ${st.prepared.products} recent products · ${formatKolkata(st.prepared.at)}` : "Runs every 30 min once posts come in"}</Cell>
       <Cell label="Last error" testid="reader-last-error" tone={st.last_error ? "text-rose-700" : ""}>{st.last_error ? `${formatKolkata(st.last_error.at)} · ${st.last_error.where}: ${st.last_error.message}` : "None"}</Cell>
     </div>
   </Panel>
 );
 
+const ROWS = [["delivery", "Telegram delivery"], ["opening", "Opening the link"], ["converting", "Converting + repeat check"], ["posting", "Posting"], ["ours", "Our part (all of the above except delivery)"], ["total", "Total, source post → our post"]];
+const SpeedView = ({ sp }) => (
+  <Panel testid="reader-speed-panel" title="Speed (last 50 posts)" desc="Average, middle and slow (90th percentile) times. Goal: total under 2 s.">
+    {!sp?.posts ? <p data-testid="reader-speed-empty" className="text-sm text-slate-600">No posts sent yet.</p> : <>
+      <p data-testid="reader-speed-summary" className="mb-3 text-sm font-semibold">{sp.under_2s} of {sp.posts} posts under 2 s · {sp.under_3s} under 3 s · {sp.ready_links} used a ready link</p>
+      <div className="overflow-x-auto"><table className="w-full text-left text-sm">
+        <thead><tr className="font-mono text-[10px] uppercase tracking-wider text-slate-500"><th className="py-1">Step</th><th>Average</th><th>Middle</th><th>Slow</th></tr></thead>
+        <tbody>{ROWS.map(([k, label]) => <tr key={k} data-testid={`reader-speed-${k}`} className={`border-t border-slate-200 ${k === "total" ? "font-semibold" : ""}`}><td className="py-1.5 pr-3">{label}</td><td>{sp[k] ? s1(sp[k].avg) : "—"}</td><td>{sp[k] ? s1(sp[k].median) : "—"}</td><td>{sp[k] ? s1(sp[k].p90) : "—"}</td></tr>)}</tbody>
+      </table></div>
+    </>}
+  </Panel>
+);
+
 const SettingsForm = ({ s, setS, bots }) => {
-  const [f, setF] = useState({ caption: s.reader_caption || "", sources: (s.reader_sources || []).join(", "), dests: s.reader_destinations || [], bot: s.reader_post_bot || "account", photo: !!s.reader_photo, tryShort: !!s.reader_try_short });
+  const [f, setF] = useState({ caption: s.reader_caption || "", sources: (s.reader_sources || []).join(", "), dests: s.reader_destinations || [], bot: s.reader_post_bot || "account", photo: !!s.reader_photo, tryShort: !!s.reader_try_short, sankmo: !!s.reader_use_sankmo, soldOut: s.reader_mark_sold_out !== false });
   const save = async () => {
     try {
-      const { data } = await api.put("/settings", { reader_caption: f.caption, reader_sources: f.sources.split(/[\s,]+/).filter(Boolean), reader_destinations: f.dests, reader_post_bot: f.bot, reader_photo: f.photo, reader_try_short: f.tryShort });
+      const { data } = await api.put("/settings", { reader_caption: f.caption, reader_sources: f.sources.split(/[\s,]+/).filter(Boolean), reader_destinations: f.dests, reader_post_bot: f.bot, reader_photo: f.photo, reader_try_short: f.tryShort, reader_use_sankmo: f.sankmo, reader_mark_sold_out: f.soldOut });
       setS(data); toast.success("Reader settings saved");
     } catch (e) { toast.error(errMsg(e)); }
   };
@@ -73,6 +87,8 @@ const SettingsForm = ({ s, setS, bots }) => {
           {bots.map((b) => <option key={b.id} value={b.id}>{b.name} bot</option>)}
         </select>
         <label className="flex items-center gap-3 text-sm"><Switch data-testid="reader-photo-switch" checked={f.photo} onCheckedChange={(v) => setF({ ...f, photo: v })} /> Include the source photo (adds about 0.5–1 s)</label>
+        <label className="flex items-center gap-3 text-sm"><Switch data-testid="reader-sold-out-switch" checked={f.soldOut} onCheckedChange={(v) => setF({ ...f, soldOut: v })} /> Add “❌ Sold out” to our post when the source marks the deal out of stock</label>
+        <label className="flex items-center gap-3 text-sm"><Switch data-testid="reader-use-sankmo-switch" checked={f.sankmo} onCheckedChange={(v) => setF({ ...f, sankmo: v })} /> Use Sankmo as backup. Who goes first follows Affiliate Setup → Converter order; the next one is asked if the first takes over 0.9 s (off = never Sankmo)</label>
         <label className="flex items-center gap-3 text-sm"><Switch data-testid="reader-try-short-switch" checked={f.tryShort} onCheckedChange={(v) => setF({ ...f, tryShort: v })} /> Test: send the source's short link straight to ExtraPe (can save about 0.7 s if ExtraPe accepts it)</label>
         <Button data-testid="reader-settings-save" className={primaryBtn} onClick={save}>Save</Button>
       </div>
@@ -81,14 +97,16 @@ const SettingsForm = ({ s, setS, bots }) => {
 };
 
 export const ReaderTab = () => {
-  const [st, setSt] = useState(null), [s, setS] = useState(null), [bots, setBots] = useState([]), [error, setError] = useState("");
+  const [st, setSt] = useState(null), [s, setS] = useState(null), [bots, setBots] = useState([]), [error, setError] = useState(""), [sp, setSp] = useState(null);
+  const loadSpeed = () => api.get("/reader/speed").then((r) => setSp(r.data), () => {});
   const load = () => api.get("/reader/status").then((r) => setSt(r.data), (e) => setError(errMsg(e)));
   useEffect(() => {
     load();
     api.get("/settings").then((r) => setS(r.data), (e) => setError(errMsg(e)));
     api.get("/destinations").then((r) => setBots(r.data), () => {});
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
+    loadSpeed();
+    const t = setInterval(load, 5000), t2 = setInterval(loadSpeed, 30000);
+    return () => { clearInterval(t); clearInterval(t2); };
   }, []);
   const toggle = async (on) => {
     try { const { data } = await api.put("/settings", { reader_enabled: on }); setS(data); toast.success(on ? "Reader switched on" : "Reader switched off"); setTimeout(load, 2500); } catch (e) { toast.error(errMsg(e)); }
@@ -101,6 +119,7 @@ export const ReaderTab = () => {
         {!s.tg_connected && <p data-testid="reader-login-missing" className="mt-3 text-xs text-amber-800">Log in with your spare Telegram account in Affiliate Setup → Keys &amp; logins first.</p>}
       </Panel>
       <StatusView st={st} load={load} />
+      <SpeedView sp={sp} />
       <SettingsForm s={s} setS={setS} bots={bots} />
     </div>
   );

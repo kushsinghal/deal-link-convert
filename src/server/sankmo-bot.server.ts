@@ -168,14 +168,20 @@ function replyLinks(m: any) {
 }
 
 let botUserId: string | null = null;
+// After a request times out, its late answer may still arrive; for a while only answers that reply to our own message count.
+let strictUntil = 0;
+type BotOpts = { signal?: AbortSignal; timeoutMs?: number };
 
 /** The reply is picked up the moment it arrives (live update); a slower check every 1.5 s is the backup. */
-async function convertOnce(url: string) {
+async function convertOnce(url: string, opts: BotOpts = {}) {
+  if (opts.signal?.aborted) throw new Error("Sankmo bot: cancelled, the other converter answered first");
   const c = await getClient();
   const { NewMessage } = await import("telegram/events");
   if (!botUserId) botUserId = String((await c.getEntity(BOT)).id);
-  const wait = 1500 - (Date.now() - lastSent);
+  const wait = 1000 - (Date.now() - lastSent);
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  if (opts.signal?.aborted) throw new Error("Sankmo bot: cancelled, the other converter answered first");
+  const strict = Date.now() < strictUntil;
   let sentId = 0, lastText = "", done = false;
   const early: any[] = [];
   let resolveLink!: (v: string) => void, rejectLink!: (e: Error) => void;
@@ -187,7 +193,7 @@ async function convertOnce(url: string) {
     if (m.id <= sentId) return;
     // A late answer to an earlier link replies to that link's message; it must not be taken for this one.
     const replyTo = m.replyTo?.replyToMsgId;
-    if (replyTo && replyTo !== sentId) return;
+    if (replyTo ? replyTo !== sentId : strict) return;
     lastText = String(m.message || "").slice(0, 160);
     const link = replyLinks(m).find((u) => u !== url && !/t\.me\/|telegram\.me/i.test(u));
     if (link) { done = true; resolveLink(link); }
@@ -196,9 +202,14 @@ async function convertOnce(url: string) {
   const handler = (e: any) => { if (String(e.message?.peerId?.userId ?? "") === botUserId) check(e.message); };
   c.addEventHandler(handler, event);
   const poll = setInterval(() => { c.getMessages(BOT, { limit: 5, minId: sentId }).then((msgs: any[]) => [...msgs].reverse().forEach(check), () => {}); }, 1500);
-  const timer = setTimeout(() => { done = true; rejectLink(new Error(`Sankmo bot: ${lastText || "no reply within 15s"}`)); }, 15000);
+  const limit = opts.timeoutMs || 15000;
+  const timer = setTimeout(() => { done = true; strictUntil = Date.now() + 60_000; rejectLink(new Error(`Sankmo bot: ${lastText || `no reply within ${Math.round(limit / 1000)}s`}`)); }, limit);
+  let sending = false;
+  const onCancel = () => { if (sentId || sending) strictUntil = Date.now() + 60_000; done = true; rejectLink(new Error("Sankmo bot: cancelled, the other converter answered first")); };
+  opts.signal?.addEventListener("abort", onCancel, { once: true });
   try {
     let sent: any;
+    sending = true;
     try { sent = await c.sendMessage(BOT, { message: url }); } catch (e: any) {
       if (e?.seconds) throw new Error(`Sankmo bot: Telegram asked to wait ${e.seconds}s (flood protection)`);
       throw new Error(`Sankmo bot: ${e?.errorMessage || e?.message || "send failed"}`);
@@ -211,12 +222,13 @@ async function convertOnce(url: string) {
     done = true;
     clearTimeout(timer);
     clearInterval(poll);
+    opts.signal?.removeEventListener("abort", onCancel);
     try { c.removeEventHandler(handler, event); } catch { /* client closed */ }
   }
 }
 
-export function convertViaSankmoBot(url: string): Promise<string> {
-  const job = queue.then(() => convertOnce(url), () => convertOnce(url));
+export function convertViaSankmoBot(url: string, opts: BotOpts = {}): Promise<string> {
+  const job = queue.then(() => convertOnce(url, opts), () => convertOnce(url, opts));
   queue = job.catch(() => undefined);
   return job;
 }

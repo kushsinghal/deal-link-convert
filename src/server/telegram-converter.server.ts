@@ -204,7 +204,7 @@ const isReaderPost = (urls: string[]) => urls.length > 0 && urls.every((u) => (r
 
 export function resetConverterCaches() { local.clear(); localClaims.clear(); connectedLocal.clear(); settingsCache = null; }
 
-export const ROUTE_KEYS = ["converter_bot_service", "converter_order", "affiliate_routes", "affiliate_chains", "amazon_route", "amazon_tag", "extrape_token", "earnkaro_token", "sankmo_token", "sankmo_api_url", "convert_mode", "convert_enabled", "tg_session"];
+export const ROUTE_KEYS = ["converter_bot_service", "converter_order", "converter_disabled", "affiliate_routes", "affiliate_chains", "amazon_route", "amazon_tag", "extrape_token", "earnkaro_token", "sankmo_token", "sankmo_api_url", "convert_mode", "convert_enabled", "tg_session"];
 /** Called after settings are saved: the bot reads them again, and remembered links are dropped when the converter setup changed. */
 export async function settingsChanged(changed: string[]) {
   settingsCache = null;

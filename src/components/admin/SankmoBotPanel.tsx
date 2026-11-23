@@ -5,6 +5,7 @@ import { ArrowUp, ArrowDown } from "lucide-react";
 import { api, errMsg } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Panel, fieldCls, primaryBtn, ghostBtn } from "./Panel";
 
 const NAMES = { extrape: "ExtraPe", earnkaro: "EarnKaro", sankmo: "Sankmo" };
@@ -16,9 +17,14 @@ export const ConverterOrderPanel = ({ s, setS }) => {
     [next[i], next[i + d]] = [next[i + d], next[i]];
     try { const { data } = await api.put("/settings", { converter_order: next }); setS(data); toast.success("Converter order saved"); } catch (e) { toast.error(errMsg(e)); }
   };
-  return <Panel testid="converter-order-panel" title="Converter order" desc="Default order for stores you have not set yourself in Affiliate route by store. The next one is used only if the one above fails or has no token.">
+  const off = s.converter_disabled || [];
+  const toggle = async (k, on) => {
+    try { const { data } = await api.put("/settings", { converter_disabled: on ? off.filter((x) => x !== k) : [...off, k] }); setS(data); toast.success(on ? `${NAMES[k]} switched on` : `${NAMES[k]} switched off`); } catch (e) { toast.error(errMsg(e)); }
+  };
+  return <Panel testid="converter-order-panel" title="Converter order" desc="Default order for stores you have not set yourself in Affiliate route by store. The next one is used only if the one above fails or has no token. Switch a converter off to never use it.">
     <ol className="space-y-2">{order.map((k, i) => <li key={k} data-testid={`converter-order-item-${k}`} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
-      <span className="w-6 text-sm font-bold text-slate-500">{i + 1}.</span><span className="flex-1 text-sm font-semibold">{NAMES[k]}</span>
+      <span className="w-6 text-sm font-bold text-slate-500">{i + 1}.</span><span className={`flex-1 text-sm font-semibold ${off.includes(k) ? "text-slate-400 line-through" : ""}`}>{NAMES[k]}</span>
+      <Switch aria-label={`Use ${NAMES[k]}`} data-testid={`converter-order-switch-${k}`} checked={!off.includes(k)} disabled={!off.includes(k) && off.length >= order.length - 1} onCheckedChange={(v) => toggle(k, v)} />
       <Button size="icon" aria-label={`Move ${NAMES[k]} up`} data-testid={`converter-order-up-${k}`} className={ghostBtn} disabled={i === 0} onClick={() => move(i, -1)}><ArrowUp className="h-4 w-4" /></Button>
       <Button size="icon" aria-label={`Move ${NAMES[k]} down`} data-testid={`converter-order-down-${k}`} className={ghostBtn} disabled={i === order.length - 1} onClick={() => move(i, 1)}><ArrowDown className="h-4 w-4" /></Button>
     </li>)}</ol>

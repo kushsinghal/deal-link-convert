@@ -641,12 +641,17 @@ async function convertWithSankmoApi(url: string, settings: any) {
 
 // Sankmo: Telegram bot login first, otherwise the custom API or token.
 async function convertWithSankmo(url: string, settings: any) {
-  if (settings.tg_session) return (await import("./sankmo-bot.server")).convertViaSankmoBot(url);
+  if (settings.tg_session) return (await import("./sankmo-bot.server")).convertViaSankmoBot(url, { signal: settings.cancel_signal, timeoutMs: settings.sankmo_timeout_ms });
   if (settings.convert_mode === "api" && (settings.sankmo_api_url || "").trim()) return convertWithSankmoApi(url, settings);
   return convertWithSankmoToken(url, settings);
 }
 
 const has = (s: any, k: string) => !!String(s[k] || "").trim();
+/** Converter wait: 20 s normally; the channel reader asks for a short wait and can cancel. */
+const convertSignal = (settings: any) => {
+  const t = AbortSignal.timeout(Number(settings.convert_timeout_ms) || 20000);
+  return settings.cancel_signal ? AbortSignal.any([t, settings.cancel_signal]) : t;
+};
 const CONVERTERS: Record<string, [string, (u: string, s: any) => Promise<string>, (s: any) => boolean]> = {
   extrape: ["ExtraPe", (u, s) => convertWithExtraPe(u, s), (s) => has(s, "extrape_token")],
   earnkaro: ["EarnKaro", (u, s) => convertWithEarnKaro(u, s), (s) => has(s, "earnkaro_token")],
@@ -654,17 +659,22 @@ const CONVERTERS: Record<string, [string, (u: string, s: any) => Promise<string>
 };
 export const DEFAULT_CONVERTER_ORDER = ["extrape", "earnkaro", "sankmo"];
 
+/** A converter switched off in Converter order is never used, even as a backup. */
+export const converterOn = (settings: any, k: string) => k in CONVERTERS && CONVERTERS[k][2](settings) && !(settings.converter_disabled || []).includes(k);
+
 export function converterChain(settings: any, preferred?: string) {
   const saved = Array.isArray(settings.converter_order) ? settings.converter_order.filter((k: string) => k in CONVERTERS) : [];
   let order = [...new Set([...saved, ...DEFAULT_CONVERTER_ORDER])];
   if (preferred && preferred in CONVERTERS) order = [preferred, ...order.filter((k) => k !== preferred)];
-  return order.filter((k) => CONVERTERS[k][2](settings));
+  return order.filter((k) => converterOn(settings, k));
 }
 
 async function runChain(url: string, settings: any, chain: string[], used?: { service?: string }) {
   if (!chain.length) throw new Error("Add your ExtraPe access token or another converter chosen in this store's route in Affiliate Setup.");
   const errors: string[] = [];
   for (const key of chain) {
+    // The reader cancels the slower converter once the other one has answered; stop here instead of trying backups.
+    if (settings.cancel_signal?.aborted) throw new Error("Cancelled: the other converter answered first");
     if (key === "original") return url;
     const [name, fn] = key === "amazon" ? ["Amazon.in", (u, s) => amazonAffiliate(u, s.amazon_tag)] : CONVERTERS[key];
     try { const out = await fn(url, settings); if (used) used.service = name; return out; } catch (e) {
@@ -685,7 +695,7 @@ async function convertWithExtraPe(url: string, settings: any) {
     method: "POST",
     body: JSON.stringify({ inputText: input, bitlyConvert: false, advanceMode: false }),
     headers: { "Content-Type": "application/json", accesstoken: token, Cookie: `accessToken=${token}` },
-    signal: AbortSignal.timeout(20000),
+    signal: convertSignal(settings),
   });
   const raw = await r.text();
   let data: any;
@@ -744,7 +754,9 @@ export async function convertLink(url: string, settings: any, used?: { service?:
   // The Telegram bot can put one converter first; the others stay as backup.
   const first = settings.force_service;
   if (first && first in CONVERTERS && !(store === "Amazon" && first === "sankmo")) chain = [first, ...chain.filter((k: string) => k !== first)];
-  const usable = chain.filter((k: string) => k === "amazon" ? store === "Amazon" : k in CONVERTERS && CONVERTERS[k][2](settings));
+  let usable = chain.filter((k: string) => k === "amazon" ? store === "Amazon" : converterOn(settings, k));
+  // The reader's backup request asks only its own converter; the first request already walks the whole order.
+  if (settings.only_service) usable = usable.filter((k: string) => k === settings.only_service);
   return runChain(url, settings, usable, used);
 }
 
@@ -755,7 +767,7 @@ async function convertWithEarnKaro(url: string, settings: any) {
     method: "POST",
     body: JSON.stringify({ deal: url, convert_option: "convert_only" }),
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(20000),
+    signal: convertSignal(settings),
   });
   const raw = await r.text();
   let data: any;

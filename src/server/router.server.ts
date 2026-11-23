@@ -82,6 +82,13 @@ export async function handle(request: Request, splat: string) {
       if (!verifyCronRequest(request)) return json({ detail: "Unauthorized" }, 401);
       return json(await core.startFetchAll(publicOrigin(url), { wait: true }));
     }
+    if (method === "POST" && a === "cron" && b === "report") {
+      // Cron endpoints must ack 2xx immediately; enqueue/background the actual work.
+      const { verifyCronRequest } = await import("./auth.server");
+      if (!verifyCronRequest(request)) return json({ detail: "Unauthorized" }, 401);
+      void import("./private-reader.server").then((r) => r.dailyReport()).catch((e) => console.error("daily report failed", e?.message));
+      return json({ queued: true }, 202);
+    }
     if (method === "POST" && a === "auth" && b === "login") {
       const { login } = await import("./auth.server");
       const token = login(String(body.password || ""));
@@ -107,7 +114,8 @@ export async function handle(request: Request, splat: string) {
       if (c === "disconnect") return json(await telegram.disconnectConverter());
       if (c === "menu") return json(await telegram.syncBotMenu());
     }
-    if (a === "reader" && b === "status" && method === "GET") return json({ ...(await import("./private-reader.server")).readerStatus(), has_login: !!(await core.getSettings()).tg_session });
+    if (a === "reader" && b === "speed" && method === "GET") return json(await (await import("./private-reader.server")).readerSpeed());
+    if (a === "reader" && b === "status" && method === "GET") return json({ ...(await (await import("./private-reader.server")).readerStatus()), has_login: !!(await core.getSettings()).tg_session });
     if (a === "sankmo-bot") {
       const bot = await import("./sankmo-bot.server");
       try {

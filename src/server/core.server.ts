@@ -43,7 +43,7 @@ const DEFAULT_SETTINGS = {
   copy_header: "🪙 100% SuperCoin Deals 🪙", copy_link_style: "direct", converter_label_style: "store", converter_repeat_minutes: 5, converter_bot_service: "auto", converter_order: engine.DEFAULT_CONVERTER_ORDER, sankmo_stores: engine.SANKMO_DEFAULT, split_multi: true,
   reader_enabled: false, reader_caption: readerConfig.caption || "", reader_sources: readerConfig.sources,
   reader_destinations: readerConfig.destinations.map((chat) => ({ chat, min_price: /deltfetch/i.test(chat) ? 4500 : 0 })),
-  reader_post_bot: "account", reader_photo: false, reader_try_short: false,
+  reader_post_bot: "account", reader_photo: false, reader_try_short: false, reader_use_sankmo: true, reader_mark_sold_out: true, converter_disabled: [],
 };
 
 async function check(res: any) {
@@ -861,6 +861,12 @@ export async function writeSettings(body: any) {
   clamp("max_posts_per_update", 1, 200);
   clamp("converter_repeat_minutes", 5, 60);
   validateReader(upd);
+  if ("converter_disabled" in upd) {
+    const list = upd.converter_disabled;
+    if (!Array.isArray(list) || list.some((k) => !engine.DEFAULT_CONVERTER_ORDER.includes(k))) throw new HttpError(400, "Unknown converter");
+    if (new Set(list).size >= engine.DEFAULT_CONVERTER_ORDER.length) throw new HttpError(400, "Keep at least one converter switched on");
+    upd.converter_disabled = [...new Set(list)];
+  }
   await updateSettings(upd);
   if (Object.keys(upd).some((k) => k.startsWith("reader_"))) void import("./private-reader.server").then((r) => r.restartReader()).catch(() => {});
   return readSettings();
@@ -868,7 +874,7 @@ export async function writeSettings(body: any) {
 
 const CHANNEL = /^(?:https?:\/\/)?(?:t\.me\/|@)?([A-Za-z][A-Za-z0-9_]{3,31})$/;
 function validateReader(upd) {
-  for (const k of ["reader_enabled", "reader_photo", "reader_try_short"]) if (k in upd && typeof upd[k] !== "boolean") throw new HttpError(400, `${k} must be true or false`);
+  for (const k of ["reader_enabled", "reader_photo", "reader_try_short", "reader_use_sankmo", "reader_mark_sold_out"]) if (k in upd && typeof upd[k] !== "boolean") throw new HttpError(400, `${k} must be true or false`);
   if ("reader_caption" in upd) upd.reader_caption = String(upd.reader_caption).slice(0, 500);
   if ("reader_post_bot" in upd) upd.reader_post_bot = String(upd.reader_post_bot).slice(0, 64) || "account";
   if ("reader_sources" in upd) {
