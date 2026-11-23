@@ -89,6 +89,9 @@ export async function handle(request: Request, splat: string) {
       void import("./private-reader.server").then((r) => r.dailyReport()).catch((e) => console.error("daily report failed", e?.message));
       return json({ queued: true }, 202);
     }
+    if (method === "POST" && a === "v1" && b === "convert" && !c) {
+      return json(await (await import("./converter-api.server")).apiConvert(request, body));
+    }
     if (method === "POST" && a === "auth" && b === "login") {
       const { login } = await import("./auth.server");
       const token = login(String(body.password || ""));
@@ -113,6 +116,12 @@ export async function handle(request: Request, splat: string) {
       if (c === "status") return json(await telegram.converterStatus());
       if (c === "disconnect") return json(await telegram.disconnectConverter());
       if (c === "menu") return json(await telegram.syncBotMenu());
+    }
+    if (a === "converter-api") {
+      const capi = await import("./converter-api.server");
+      if (method === "GET" && !b) return json(await capi.apiKeyStatus());
+      if (method === "POST" && b === "key") return json(await capi.newApiKey());
+      if (method === "DELETE" && b === "key") return json(await capi.removeApiKey());
     }
     if (a === "reader" && b === "speed" && method === "GET") return json(await (await import("./private-reader.server")).readerSpeed());
     if (a === "reader" && b === "status" && method === "GET") return json({ ...(await (await import("./private-reader.server")).readerStatus()), has_login: !!(await core.getSettings()).tg_session });

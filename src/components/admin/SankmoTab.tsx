@@ -13,6 +13,7 @@ import { TelegramConverterPanel } from "./TelegramConverterPanel";
 import { StoreRoutesPanel, CommissionPanel } from "./StoreRoutesPanel";
 import { SankmoBotPanel, ConverterOrderPanel } from "./SankmoBotPanel";
 import { AmazonTagPanel } from "./AmazonTagPanel";
+import { ConverterApiPanel } from "./ConverterApiPanel";
 import { BotCommandsPanel } from "./BotCommandsPanel";
 
 const Tester = () => {
@@ -105,7 +106,7 @@ export const SankmoTab = () => {
           <Button data-testid="sankmo-save-button" className={primaryBtn} onClick={() => save()}>Save</Button>
         </div>
       </Panel>
-        <div className="space-y-6"><SankmoBotPanel /><AmazonTagPanel s={s} setS={setS} /></div>
+        <div className="space-y-6"><SankmoBotPanel /><AmazonTagPanel s={s} setS={setS} /><ConverterApiPanel /></div>
       </TabsContent>
       <TabsContent value="routes" className="mt-5 grid items-start gap-6 lg:grid-cols-3">
         <div className="space-y-6"><ConverterOrderPanel s={s} setS={setS} /><Tester /><CommissionPanel />
