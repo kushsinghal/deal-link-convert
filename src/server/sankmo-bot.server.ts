@@ -39,11 +39,11 @@ function creds() {
 
 async function settingsCol() { return (await mongo()).collection("settings"); }
 
-async function makeClient(session = "") {
+async function makeClient(session = "", requestRetries = 1) {
   const { TelegramClient } = await import("telegram");
   const { StringSession } = await import("telegram/sessions");
   const { apiId, apiHash } = creds();
-  const c = new TelegramClient(new StringSession(session), apiId, apiHash, { connectionRetries: 2, requestRetries: 1, floodSleepThreshold: 0, timeout: 10 });
+  const c = new TelegramClient(new StringSession(session), apiId, apiHash, { connectionRetries: 2, requestRetries, floodSleepThreshold: 0, timeout: 10 });
   c.setLogLevel("error" as any);
   await c.connect();
   return c;
@@ -99,7 +99,7 @@ export async function sendLoginCode(phone: string) {
   loginBusy = true;
   let c: any;
   try {
-    c = await makeClient();
+    c = await makeClient("", 5);
     const r = await c.sendCode(creds(), phone);
     await savePending({ session: c.session.save(), phone, hash: r.phoneCodeHash, password_required: false });
     return { sent: true, via_app: r.isCodeViaApp };
@@ -117,7 +117,7 @@ export async function verifyLoginCode(code: string, password?: string) {
   let c: any;
   let user: any;
   try {
-    c = await makeClient(pending.session);
+    c = await makeClient(pending.session, 5);
     if (!pending.password_required) {
       try {
         const r: any = await c.invoke(new Api.auth.SignIn({ phoneNumber: pending.phone, phoneCodeHash: pending.hash, phoneCode: String(code).trim() }));
