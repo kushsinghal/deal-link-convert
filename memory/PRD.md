@@ -241,3 +241,11 @@
 - Live API check: code deployed (reader/status exists, reader_post_bot account, converter bot now @xtelgobot) but NO Telegram user login saved on live (sankmo-bot/status connected:false). Reader cannot start without it. Live send-code attempt by agent returned generic error (likely SEND_CODE_UNAVAILABLE after ~5 code requests today) — user must log in themselves later in Affiliate Setup → Keys & logins → Sankmo via Telegram.
 - Fixes (preview, need GitHub push + Render redeploy): loginError shows Telegram's real reason; reader/status has has_login + login error; ReaderTab verdict line "Working / Not working: reason"; login error cleared after connecting; failed source retried every 60 s; unreachable channel retried even when other channel already posted. vitest 168/168, tsc clean. Testing iteration_3: fixed 099, 109, 066, 098.
 - Where to see: Channel Reader tab (verdict, last read/sent + timing line), Converter History (rows "Reader: source → channel" with delivery/opening/converter/Telegram/total).
+
+## 2026-06 — Reader: delete our post when source deletes within 2 min
+- Source post deleted ≤2 min after it was posted (src_at saved in reader_posts) → our posts in every destination channel are DELETED (account: deleteMessages revoke; bot: deleteMessage), product repeat-claim released so a re-post can go out again, Converter History row status `deleted`.
+- Deleted later than 2 min → old behaviour: our post edited with "❌ Deal expired".
+- Deleted while we were still converting → not posted at all (deletedEarly map, 10 min). Deleted while sending → deleted right after posting.
+- Safety net: every 8 s poll checks reader_posts from the last 2 min against the source (getMessages ids; missing/MessageEmpty = deleted), since Telegram delete notices are not 100% reliable.
+- OOS (unchanged): source edit or reply with OOS/sold out/blinked/lasted/price increased → our post gets "❌ Sold out" line once (setting reader_mark_sold_out). A new post that is itself an OOS notice is never posted.
+- Verified: vitest private-reader-flow 22/22 (3 new), tsc clean. NOT verified against real Telegram / Render. Needs GitHub push + Render redeploy. Spare account must have "Delete messages" admin right in dealfetch/Deltfetch.

@@ -10,6 +10,10 @@ import { buildPost, messageLinks, parseDeal, priceNumber } from "./private-reade
 const POLL_MS = 8000;
 const MAX_AGE_MS = 3 * 60_000;
 const DAY = 86400_000;
+// A source deleting its post within this time deletes our copies too; later deletions only add "Deal expired".
+const DELETE_WINDOW_MS = 2 * 60_000;
+// Source posts deleted before our copy was saved (key -> time), checked again once the copy is posted.
+const deletedEarly = new Map<string, number>();
 
 type Source = { name: string; id: string; entity: any; lastId: number; retry?: Map<number, number> };
 const state = {
@@ -142,11 +146,11 @@ async function attach(c: any) {
   c.addEventHandler(editHandler, editEvent);
   c._readerEdit = editEvent;
   c._readerEditHandler = editHandler;
-  // A source deleting its post: our post stays, with a "Deal expired" line.
+  // A source deleting its post: within 2 min our posts are deleted too, later they get a "Deal expired" line.
   const { DeletedMessage } = await import("telegram/events/DeletedMessage");
   if (attached?._readerDel) try { attached.removeEventHandler(attached._readerDelHandler, attached._readerDel); } catch { /* old client */ }
   const delEvent = new DeletedMessage({});
-  const delHandler = (ev: any) => { const src = sources.find((x) => x.id === String(ev.peer?.channelId ?? "")); if (src) for (const id of ev.deletedIds || []) void markSoldOut(src, Number(id), "❌ Deal expired").catch((e) => fail("deal-expired", e)); };
+  const delHandler = (ev: any) => { const src = sources.find((x) => x.id === String(ev.peer?.channelId ?? "")); if (src) for (const id of ev.deletedIds || []) void onSourceDeleted(src, Number(id)).catch((e) => fail("source-deleted", e)); };
   c.addEventHandler(delHandler, delEvent);
   c._readerDel = delEvent;
   c._readerDelHandler = delHandler;
@@ -170,6 +174,7 @@ async function tick() {
       if (src.retry?.size) missed.push(...(await c.getMessages(src.entity, { ids: [...src.retry.keys()] })).filter(Boolean));
       await Promise.all(missed.map((m: any) => onMessage(src, m, "poll")));
     }
+    void checkDeleted(c).catch((e) => fail("check deleted", e));
     void warmLinks().catch((e) => fail("prepare links", e));
   } catch (e) { state.connected = false; fail("poll", e); }
 }
@@ -185,7 +190,7 @@ async function firstTime(key: string) {
   }
 }
 
-type Poster = { prefix: string; resolve(chat: string): Promise<string>; send(chatId: string, text: string, photo: Buffer | null): Promise<any>; edit(chatId: string, messageId: number, text: string, photo: boolean): Promise<unknown>; warm(): void };
+type Poster = { prefix: string; resolve(chat: string): Promise<string>; send(chatId: string, text: string, photo: Buffer | null): Promise<any>; edit(chatId: string, messageId: number, text: string, photo: boolean): Promise<unknown>; remove(chatId: string, messageId: number): Promise<unknown>; warm(): void };
 const accountChats = new Map<string, any>();
 
 /** Posting from the spare account uses the connection that is already open: no extra trip to Telegram's bot server. */
@@ -211,6 +216,9 @@ function accountPoster(settings: any): Poster {
     },
     async edit(chatId, messageId, text) {
       return attached.editMessage(accountChats.get(chatId), { message: messageId, text, linkPreview: true });
+    },
+    async remove(chatId, messageId) {
+      return attached.deleteMessages(accountChats.get(chatId), [messageId], { revoke: true });
     },
     warm() {},
   };
@@ -246,6 +254,9 @@ async function botPoster(settings: any): Promise<Poster> {
     edit(chatId, messageId, text, photo) {
       return photo ? conv.telegramCall(t, "editMessageCaption", { chat_id: chatId, message_id: messageId, caption: text })
         : conv.telegramCall(t, "editMessageText", { chat_id: chatId, message_id: messageId, text });
+    },
+    remove(chatId, messageId) {
+      return conv.telegramCall(t, "deleteMessage", { chat_id: chatId, message_id: messageId });
     },
     // Opens the connection to the bot server now, so it is ready when the post goes out.
     warm() { void fetch(`https://api.telegram.org/bot${t}/getMe`, { signal: AbortSignal.timeout(5000) }).then((r) => r.body?.cancel(), () => {}); },
@@ -429,6 +440,13 @@ async function handle(src: Source, m: any, via: string, receivedAt: number, mess
     if (!repeat && items.some((i) => i.error && !UNSUPPORTED.test(i.error))) throw new Retry(items[0]?.error || "conversion failed");
     return;
   }
+  // The source already deleted this post while we were converting: nothing is posted.
+  if (deletedEarly.has(`${src.id}:${m.id}`) && receivedAt - messageAt < DELETE_WINDOW_MS) {
+    deletedEarly.delete(`${src.id}:${m.id}`);
+    await conv.releaseProducts(db, plan.flatMap((c) => c.fresh));
+    await log([{ chat_title: `Reader: ${src.name}`, store: products[0]?.store, original: products[0]?.original, cleaned: products[0]?.cleaned, converted: null, status: "deleted", error: "Source deleted its post before we posted it; nothing posted" }]);
+    return;
+  }
   const photo = settings.reader_photo && m.photo ? await (attached?.downloadMedia(m, {}) as Promise<Buffer>).catch(() => null) : null;
   conv.markReaderPost(made.map((i) => i.converted));
   const sendStart = Date.now();
@@ -448,8 +466,10 @@ async function handle(src: Source, m: any, via: string, receivedAt: number, mess
   const firstOk = sent.find((x) => x.ok);
   if (firstOk) state.last_sent = { at: new Date(firstOk.at).toISOString(), source: src.name, to: sent.filter((x) => x.ok).map((x) => botChat(x.c.d.chat)), total_ms: firstOk.at - messageAt, title: deal.title, processing_ms: firstOk.at - receivedAt, delivery_ms: Math.max(0, receivedAt - messageAt), open_ms: openMs, convert_ms: serviceMs, send_ms: firstOk.at - sendStart, by: settings.reader_post_bot === "account" || !settings.reader_post_bot ? "spare account" : "bot" };
   persist();
-  const posted = sent.filter((x: any) => x.ok && x.message_id).map((x: any) => ({ chat: x.c.d.chat, chat_id: x.c.id, message_id: x.message_id, text: x.text, photo: !!photo }));
-  if (posted.length) await db.collection("reader_posts").updateOne({ _id: `${src.id}:${m.id}` as any }, { $set: { at: new Date(), poster: settings.reader_post_bot || "account" }, $push: { posts: { $each: posted } } as any }, { upsert: true }).catch(() => {});
+  const posted = sent.filter((x: any) => x.ok && x.message_id).map((x: any) => ({ chat: x.c.d.chat, chat_id: x.c.id, message_id: x.message_id, text: x.text, photo: !!photo, keys: x.c.fresh, store: x.c.items[0]?.store, url: x.c.items[0]?.converted }));
+  if (posted.length) await db.collection("reader_posts").updateOne({ _id: `${src.id}:${m.id}` as any }, { $set: { at: new Date(), src_at: new Date(messageAt), src_id: src.id, msg_id: m.id, poster: settings.reader_post_bot || "account" }, $push: { posts: { $each: posted } } as any }, { upsert: true }).catch(() => {});
+  // Deleted at the source while our post was going out: delete ours now.
+  if (posted.length && deletedEarly.has(`${src.id}:${m.id}`)) await onSourceDeleted(src, m.id).catch((e) => fail("source-deleted", e));
   if (failedSends.length) fail("send", failedSends[0]?.error);
   await log(sent.flatMap((x) => x.c.items.map((i: any) => ({
     chat_id: x.c.id, chat_title: `Reader: ${src.name} → ${botChat(x.c.d.chat)}`, service: i.service || null, reused: !!i.reused, store: i.store, original: i.original, cleaned: i.cleaned,
@@ -471,7 +491,7 @@ export async function markSoldOut(src: { id: string; name: string }, messageId: 
   const settings = await readerSettings();
   if (settings.reader_mark_sold_out === false || stopped) return;
   const db = await mongo();
-  const row: any = await db.collection("reader_posts").findOneAndUpdate({ _id: `${src.id}:${messageId}` as any, sold_out: { $ne: true } }, { $set: { sold_out: true, sold_out_at: new Date() } });
+  const row: any = await db.collection("reader_posts").findOneAndUpdate({ _id: `${src.id}:${messageId}` as any, sold_out: { $ne: true }, removed: { $ne: true } }, { $set: { sold_out: true, sold_out_at: new Date() } });
   const doc = row?.value !== undefined ? row.value : row;
   if (!doc?.posts?.length) return;
   const poster = doc.poster === "account" ? accountPoster(settings) : await botPoster({ ...settings, reader_post_bot: doc.poster });
@@ -490,6 +510,59 @@ export async function markSoldOut(src: { id: string; name: string }, messageId: 
   // Edits that failed are tried again the next time the source updates; posts already marked are not touched twice.
   const left = doc.posts.filter((_: any, i: number) => !done[i]);
   if (left.length) await db.collection("reader_posts").updateOne({ _id: doc._id }, { $set: { posts: left }, $unset: { sold_out: "" } });
+}
+
+/** The source deleted a post: if it was posted under 2 min ago our copies are deleted, otherwise they get "Deal expired". */
+export async function onSourceDeleted(src: { id: string; name: string }, messageId: number) {
+  if (stopped) return;
+  const key = `${src.id}:${messageId}`;
+  const db = await mongo();
+  const doc: any = await db.collection("reader_posts").findOne({ _id: key as any });
+  if (!doc?.posts?.length) {
+    // Not posted yet (still converting) or not a deal: remembered for a short while.
+    for (const [k, at] of deletedEarly) if (Date.now() - at > 10 * 60_000) deletedEarly.delete(k);
+    deletedEarly.set(key, Date.now());
+    return;
+  }
+  deletedEarly.delete(key);
+  if (doc.removed) return;
+  const age = Date.now() - new Date(doc.src_at || doc.at).getTime();
+  if (age > DELETE_WINDOW_MS) return markSoldOut(src, messageId, "❌ Deal expired");
+  const row: any = await db.collection("reader_posts").findOneAndUpdate({ _id: key as any, removed: { $ne: true } }, { $set: { removed: true, removed_at: new Date() } });
+  const claimed = row?.value !== undefined ? row.value : row;
+  if (!claimed?.posts?.length) return;
+  const settings = await readerSettings();
+  const poster = claimed.poster === "account" ? accountPoster(settings) : await botPoster({ ...settings, reader_post_bot: claimed.poster });
+  const done = await Promise.all(claimed.posts.map(async (p: any) => {
+    try {
+      await poster.remove(await poster.resolve(p.chat), p.message_id);
+      return true;
+    } catch (e: any) {
+      // Already gone from our channel counts as deleted.
+      if (/message to delete not found|MESSAGE_ID_INVALID/i.test(String(e?.errorMessage || e?.message))) return true;
+      fail(`delete ${botChat(p.chat)}`, e);
+      return false;
+    }
+  }));
+  const gone = claimed.posts.filter((_: any, i: number) => done[i]);
+  // The product may be posted again if the source re-posts it.
+  const conv = await import("./telegram-converter.server");
+  await conv.releaseProducts(db, gone.flatMap((p: any) => p.keys || []));
+  const left = claimed.posts.filter((_: any, i: number) => !done[i]);
+  if (left.length) await db.collection("reader_posts").updateOne({ _id: key as any }, { $set: { posts: left }, $unset: { removed: "" } });
+  await db.collection("converter_logs").insertMany(gone.map((p: any) => ({ id: crypto.randomUUID(), source: "reader", chat_type: "channel", chat_id: p.chat_id, chat_title: `Reader: ${src.name} → ${botChat(p.chat)}`, store: p.store || "Flipkart", original: p.url || null, cleaned: null, converted: p.url || null, status: "deleted", error: `Source deleted its post ${Math.round(age / 1000)}s after posting; deleted here too`, received_at: new Date().toISOString(), replied_at: new Date().toISOString() }))).catch(() => {});
+}
+
+/** Safety net for missed delete notices: posts from the last 2 min are checked against their source every poll. */
+async function checkDeleted(c: any) {
+  const db = await mongo();
+  const rows: any[] = await db.collection("reader_posts").find({ src_at: { $gte: new Date(Date.now() - DELETE_WINDOW_MS) }, removed: { $ne: true } }, { projection: { src_id: 1, msg_id: 1 } }).toArray();
+  for (const src of sources) {
+    const ids = rows.filter((r) => r.src_id === src.id && r.msg_id).map((r) => Number(r.msg_id));
+    if (!ids.length) continue;
+    const msgs = await c.getMessages(src.entity, { ids });
+    for (const [i, id] of ids.entries()) if (!msgs[i] || msgs[i].className === "MessageEmpty") await onSourceDeleted(src, id);
+  }
 }
 
 /** Nightly report sent to the owner chat: the day's posts, average time and how many beat 2 seconds. */

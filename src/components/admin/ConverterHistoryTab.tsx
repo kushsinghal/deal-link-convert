@@ -6,7 +6,7 @@ import { formatKolkata } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Panel, ghostBtn } from "./Panel";
 
-const STATUS = { converted: "bg-emerald-50 text-emerald-700", unchanged: "bg-amber-50 text-amber-700", failed: "bg-rose-50 text-rose-600", repeat: "bg-slate-100 text-slate-700" };
+const STATUS = { converted: "bg-emerald-50 text-emerald-700", unchanged: "bg-amber-50 text-amber-700", failed: "bg-rose-50 text-rose-600", repeat: "bg-slate-100 text-slate-700", deleted: "bg-orange-50 text-orange-700" };
 const PLACE = { channel: "Channel", group: "Group", supergroup: "Group", private: "Private chat" };
 const secs = (ms) => (ms == null ? "—" : `${(ms / 1000).toFixed(1)}s`);
 

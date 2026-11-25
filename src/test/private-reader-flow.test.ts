@@ -4,9 +4,9 @@ const st = vi.hoisted(() => ({ sent: [] as any[], logs: [] as any[], seen: new S
 vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: string) => ({
   insertOne: async (doc: any) => { if (name === "reader_seen") { if (st.seen.has(doc._id)) throw Object.assign(new Error("dup"), { code: 11000 }); st.seen.add(doc._id); } else st.logs.push(doc); },
   insertMany: async (docs: any[]) => { st.logs.push(...docs); },
-  findOne: async () => null, createIndex: async () => {},
+  findOne: async (q: any) => (name === "reader_posts" ? st.posts.get(q?._id) ?? null : null), createIndex: async () => {},
   updateOne: async (q: any, u: any) => { if (name === "reader_posts") { const d = st.posts.get(q._id) || { _id: q._id, posts: [] }; Object.assign(d, u.$set); d.posts.push(...(u.$push?.posts?.$each || [])); st.posts.set(q._id, d); } },
-  findOneAndUpdate: async (q: any, u: any) => { const d = st.posts.get(q._id); if (!d || d.sold_out) return null; const before = { ...d }; Object.assign(d, u.$set); return before; },
+  findOneAndUpdate: async (q: any, u: any) => { const d = st.posts.get(q._id); if (!d || (q.sold_out && d.sold_out) || d.removed) return null; const before = { ...d }; Object.assign(d, u.$set); return before; },
   deleteOne: async ({ _id }: any) => { st.seen.delete(_id); },
 }) }) }));
 vi.mock("@/server/core.server", () => ({ getSettings: async () => st.settings }));
@@ -166,6 +166,36 @@ describe("private reader pipeline", () => {
     await markSoldOut({ id: "55", name: "x" }, 32, "❌ Deal expired");
     const expired = st.sent.filter((x) => x.method === "editMessageText" && x.text.endsWith("❌ Deal expired"));
     expect(expired.length).toBeGreaterThan(0);
+  });
+
+  it("a source post deleted within 2 min deletes our posts and frees the product", async () => {
+    await new Promise((r) => setTimeout(r, 1100));
+    await onMessage(src("tapworthy", "44"), tap(40, "6,666"), "live");
+    await new Promise((r) => setTimeout(r, 20));
+    const { onSourceDeleted } = await import("@/server/private-reader.server");
+    await onSourceDeleted({ id: "44", name: "tapworthy" }, 40);
+    await onSourceDeleted({ id: "44", name: "tapworthy" }, 40);
+    const dels = st.sent.filter((x) => x.method === "deleteMessage");
+    expect(dels.map((d) => d.message_id)).toEqual([77, 77]);
+    expect(st.claims.size).toBe(0);
+    expect(st.logs.some((l) => l.status === "deleted")).toBe(true);
+  });
+  it("a source post deleted after 2 min keeps our post with Deal expired", async () => {
+    await new Promise((r) => setTimeout(r, 1100));
+    await onMessage(src("tapworthy", "44"), tap(41, "6,000"), "live");
+    await new Promise((r) => setTimeout(r, 20));
+    st.posts.get("44:41").src_at = new Date(Date.now() - 3 * 60_000);
+    const { onSourceDeleted } = await import("@/server/private-reader.server");
+    await onSourceDeleted({ id: "44", name: "tapworthy" }, 41);
+    expect(st.sent.some((x) => x.method === "deleteMessage")).toBe(false);
+    expect(st.sent.filter((x) => x.method === "editMessageText").every((e: any) => e.text.endsWith("❌ Deal expired"))).toBe(true);
+  });
+  it("a source post deleted before we posted it is never posted", async () => {
+    const { onSourceDeleted } = await import("@/server/private-reader.server");
+    await onSourceDeleted({ id: "44", name: "tapworthy" }, 42);
+    await onMessage(src("tapworthy", "44"), tap(42, "6,100"), "live");
+    expect(st.sent).toHaveLength(0);
+    expect(st.logs.at(-1)).toMatchObject({ status: "deleted" });
   });
 
   it("posts with no shop link (False alert / OOS) are ignored", async () => {

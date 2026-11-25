@@ -4,7 +4,7 @@ import os
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://dealloot-feed--297p4uzv.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://tapworthy-relay--34p2ut2o.preview.emergentagent.com").rstrip("/")
 ADMIN_PW = "RadheKrishna@#12"
 OFFER_STORES = ["Paytm", "Swiggy", "Zomato", "Woohoo", "Gyftr"]
 
