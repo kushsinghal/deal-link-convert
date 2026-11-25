@@ -12,6 +12,8 @@ const MAX_AGE_MS = 3 * 60_000;
 const DAY = 86400_000;
 // A source deleting its post within this time deletes our copies too; later deletions only add "Deal expired".
 const DELETE_WINDOW_MS = 2 * 60_000;
+// Backup check for missed delete notices (normally Telegram tells us within a second).
+const DELETE_POLL_MS = 2000;
 // Source posts deleted before our copy was saved (key -> time), checked again once the copy is posted.
 const deletedEarly = new Map<string, number>();
 
@@ -42,6 +44,7 @@ let sources: Source[] = [];
 let attached: any = null;
 let handler: ((e: any) => void) | null = null;
 let poller: ReturnType<typeof setInterval> | null = null;
+let delPoller: ReturnType<typeof setInterval> | null = null;
 let starting: Promise<void> | null = null;
 let checkedAt = 0;
 let attachedAt = 0;
@@ -83,7 +86,9 @@ export async function restartReader() {
 export async function stopReader() {
   stopped = true;
   if (poller) clearInterval(poller);
+  if (delPoller) clearInterval(delPoller);
   poller = null;
+  delPoller = null;
   if (attached && handler) try { attached.removeEventHandler(handler, (attached as any)._readerEvent); } catch { /* client already gone */ }
   if (attached?._readerEdit) try { attached.removeEventHandler(attached._readerEditHandler, attached._readerEdit); } catch { /* client already gone */ }
   if (attached?._readerDel) try { attached.removeEventHandler(attached._readerDelHandler, attached._readerDel); } catch { /* client already gone */ }
@@ -104,6 +109,7 @@ function startReader() {
       await attach(c);
       state.started_at = new Date().toISOString();
       poller = setInterval(() => { void tick(); }, POLL_MS);
+      delPoller = setInterval(() => { if (attached) void checkDeleted(attached).catch((e) => fail("check deleted", e)); }, DELETE_POLL_MS);
       void (await mongo()).collection("reader_seen").createIndex({ at: 1 }, { expireAfterSeconds: 86400 }).catch(() => {});
       void (await mongo()).collection("reader_posts").createIndex({ at: 1 }, { expireAfterSeconds: 2 * 86400 }).catch(() => {});
     } catch (e) { fail("start", e); state.connected = false; } finally { starting = null; }
@@ -142,7 +148,7 @@ async function attach(c: any) {
   const { EditedMessage } = await import("telegram/events/EditedMessage");
   if (attached?._readerEdit) try { attached.removeEventHandler(attached._readerEditHandler, attached._readerEdit); } catch { /* old client */ }
   const editEvent = new EditedMessage({});
-  const editHandler = (ev: any) => { const m = ev.message; const src = sources.find((x) => x.id === String(m?.peerId?.channelId ?? "")); if (src && isEnded(m.message)) void markSoldOut(src, m.id).catch((e) => fail("sold-out", e)); };
+  const editHandler = (ev: any) => { const m = ev.message; const src = sources.find((x) => x.id === String(m?.peerId?.channelId ?? "")); if (src && isEnded(m.message)) void markSoldOut(src, m.id, oosLabel(m.message)).catch((e) => fail("sold-out", e)); };
   c.addEventHandler(editHandler, editEvent);
   c._readerEdit = editEvent;
   c._readerEditHandler = editHandler;
@@ -174,7 +180,6 @@ async function tick() {
       if (src.retry?.size) missed.push(...(await c.getMessages(src.entity, { ids: [...src.retry.keys()] })).filter(Boolean));
       await Promise.all(missed.map((m: any) => onMessage(src, m, "poll")));
     }
-    void checkDeleted(c).catch((e) => fail("check deleted", e));
     void warmLinks().catch((e) => fail("prepare links", e));
   } catch (e) { state.connected = false; fail("poll", e); }
 }
@@ -347,7 +352,7 @@ export async function onMessage(src: Source, m: any, via: "live" | "poll") {
   // A sold-out notice is never posted as a fresh deal; if it answers a source post, our post for it is marked.
   if (isSoldOut(m.message) || (replyTo && isEnded(m.message))) {
     if (m.id > src.lastId) src.lastId = m.id;
-    if (replyTo) await markSoldOut(src, replyTo).catch((e) => fail("sold-out", e));
+    if (replyTo) await markSoldOut(src, replyTo, oosLabel(m.message)).catch((e) => fail("sold-out", e));
     return;
   }
   if (m.id > src.lastId) {
@@ -485,13 +490,19 @@ export const isSoldOut = (text: string) => SOLD_OUT.test(text || "");
 // Wider wording, only trusted on an edit or a reply to a deal (a new deal can mention "not available in stores").
 const GONE = /not available|unavailable|no longer available|price (?:has )?(?:increased|hiked|went up|is up)|price hike|stock (?:over|finished)/i;
 export const isEnded = (text: string) => isSoldOut(text) || GONE.test(text || "");
+/** The source's own sold-out line (e.g. "❌ OOS · blinked for 7 sec"), copied to our post as it is. */
+export function oosLabel(text: string) {
+  const line = String(text || "").split("\n").map((l) => l.trim()).filter(Boolean).reverse().find((l) => isEnded(l) && !/https?:\/\//.test(l));
+  if (!line) return "❌ Sold out";
+  return /^❌/.test(line) ? line.slice(0, 120) : `❌ ${line.slice(0, 120)}`;
+}
 
-/** The source marked its deal sold out (edit or reply) or deleted it: our posts get one line ("❌ Sold out" / "❌ Deal expired"), once. */
+/** The source marked its deal sold out (edit or reply) or deleted it: our posts get the same line; a changed line (e.g. new blink time) is updated. */
 export async function markSoldOut(src: { id: string; name: string }, messageId: number, label = "❌ Sold out") {
   const settings = await readerSettings();
   if (settings.reader_mark_sold_out === false || stopped) return;
   const db = await mongo();
-  const row: any = await db.collection("reader_posts").findOneAndUpdate({ _id: `${src.id}:${messageId}` as any, sold_out: { $ne: true }, removed: { $ne: true } }, { $set: { sold_out: true, sold_out_at: new Date() } });
+  const row: any = await db.collection("reader_posts").findOneAndUpdate({ _id: `${src.id}:${messageId}` as any, sold_out_label: { $ne: label }, removed: { $ne: true } }, { $set: { sold_out: true, sold_out_label: label, sold_out_at: new Date() } });
   const doc = row?.value !== undefined ? row.value : row;
   if (!doc?.posts?.length) return;
   const poster = doc.poster === "account" ? accountPoster(settings) : await botPoster({ ...settings, reader_post_bot: doc.poster });
@@ -509,7 +520,7 @@ export async function markSoldOut(src: { id: string; name: string }, messageId: 
   }));
   // Edits that failed are tried again the next time the source updates; posts already marked are not touched twice.
   const left = doc.posts.filter((_: any, i: number) => !done[i]);
-  if (left.length) await db.collection("reader_posts").updateOne({ _id: doc._id }, { $set: { posts: left }, $unset: { sold_out: "" } });
+  if (left.length) await db.collection("reader_posts").updateOne({ _id: doc._id }, { $set: { posts: left }, $unset: { sold_out: "", sold_out_label: "" } });
 }
 
 /** The source deleted a post: if it was posted under 2 min ago our copies are deleted, otherwise they get "Deal expired". */

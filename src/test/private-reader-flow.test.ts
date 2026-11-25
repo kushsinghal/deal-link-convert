@@ -6,7 +6,7 @@ vi.mock("@/server/db.server", () => ({ mongo: async () => ({ collection: (name: 
   insertMany: async (docs: any[]) => { st.logs.push(...docs); },
   findOne: async (q: any) => (name === "reader_posts" ? st.posts.get(q?._id) ?? null : null), createIndex: async () => {},
   updateOne: async (q: any, u: any) => { if (name === "reader_posts") { const d = st.posts.get(q._id) || { _id: q._id, posts: [] }; Object.assign(d, u.$set); d.posts.push(...(u.$push?.posts?.$each || [])); st.posts.set(q._id, d); } },
-  findOneAndUpdate: async (q: any, u: any) => { const d = st.posts.get(q._id); if (!d || (q.sold_out && d.sold_out) || d.removed) return null; const before = { ...d }; Object.assign(d, u.$set); return before; },
+  findOneAndUpdate: async (q: any, u: any) => { const d = st.posts.get(q._id); if (!d || ("sold_out_label" in q && d.sold_out_label === q.sold_out_label.$ne) || d.removed) return null; const before = { ...d }; Object.assign(d, u.$set); return before; },
   deleteOne: async ({ _id }: any) => { st.seen.delete(_id); },
 }) }) }));
 vi.mock("@/server/core.server", () => ({ getSettings: async () => st.settings }));
@@ -150,7 +150,7 @@ describe("private reader pipeline", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(st.sent.filter((x) => x.method === "editMessageText")).toHaveLength(1);
   });
-  it("a 'price increased' reply marks Sold out; a deleted source post adds Deal expired", async () => {
+  it("a 'price increased' reply copies that line; a deleted source post adds Deal expired", async () => {
     await new Promise((r) => setTimeout(r, 1100));
     await onMessage(src("Flipkart_scdeals_PranayCC", "55"), tap(30, "8,888"), "live");
     await new Promise((r) => setTimeout(r, 20));
@@ -158,7 +158,7 @@ describe("private reader pipeline", () => {
     await new Promise((r) => setTimeout(r, 20));
     const sold = st.sent.filter((x) => x.method === "editMessageText");
     expect(sold.length).toBeGreaterThan(0);
-    expect(sold.every((e: any) => e.text.endsWith("\n\n❌ Sold out"))).toBe(true);
+    expect(sold.every((e: any) => e.text.endsWith("\n\n❌ Price increased"))).toBe(true);
     st.claims.clear();
     await onMessage(src("Flipkart_scdeals_PranayCC", "55"), tap(32, "7,777"), "live");
     await new Promise((r) => setTimeout(r, 20));
@@ -196,6 +196,22 @@ describe("private reader pipeline", () => {
     await onMessage(src("tapworthy", "44"), tap(42, "6,100"), "live");
     expect(st.sent).toHaveLength(0);
     expect(st.logs.at(-1)).toMatchObject({ status: "deleted" });
+  });
+
+  it("the source's own OOS line (blinked / lasted N sec) is copied and updated when it changes", async () => {
+    const { oosLabel, markSoldOut } = await import("@/server/private-reader.server");
+    expect(oosLabel("Watch\nhttps://flipkart.com/x\n\n❌ OOS · blinked for 7 sec")).toBe("❌ OOS · blinked for 7 sec");
+    expect(oosLabel("Price increased")).toBe("❌ Price increased");
+    await new Promise((r) => setTimeout(r, 1100));
+    await onMessage(src("Flipkart_scdeals_PranayCC", "55"), tap(50, "9,100"), "live");
+    await new Promise((r) => setTimeout(r, 20));
+    await markSoldOut({ id: "55", name: "x" }, 50, "❌ OOS");
+    await markSoldOut({ id: "55", name: "x" }, 50, "❌ OOS · blinked for 7 sec");
+    await markSoldOut({ id: "55", name: "x" }, 50, "❌ OOS · blinked for 7 sec");
+    const edits = st.sent.filter((x) => x.method === "editMessageText");
+    expect(edits).toHaveLength(4);
+    expect(edits.at(-1).text.endsWith("\n\n❌ OOS · blinked for 7 sec")).toBe(true);
+    expect(edits.at(-1).text).not.toContain("❌ OOS\n");
   });
 
   it("posts with no shop link (False alert / OOS) are ignored", async () => {
