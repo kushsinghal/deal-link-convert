@@ -9,6 +9,7 @@ import { LogsTab } from "@/components/admin/LogsTab";
 import { DealsTab } from "@/components/admin/DealsTab";
 import { BulkConvertTab } from "@/components/admin/BulkConvertTab";
 import { ConverterHistoryTab } from "@/components/admin/ConverterHistoryTab";
+import { ApiConverterDashboardTab } from "@/components/admin/ApiConverterDashboardTab";
 import { ReaderTab } from "@/components/admin/ReaderTab";
 
 const TABS = [
@@ -22,6 +23,7 @@ const TABS = [
   ["logs", "Post Log", LogsTab],
   ["reader", "Channel Reader", ReaderTab],
   ["converter-history", "Converter History", ConverterHistoryTab],
+  ["api-dashboard", "API Dashboard", ApiConverterDashboardTab],
 ];
 
 export default function AdminPage() {

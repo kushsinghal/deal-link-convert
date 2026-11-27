@@ -120,8 +120,10 @@ export async function handle(request: Request, splat: string) {
     if (a === "converter-api") {
       const capi = await import("./converter-api.server");
       if (method === "GET" && !b) return json(await capi.apiKeyStatus());
+      if (method === "GET" && b === "logs") return json(await capi.apiLogs(Number(qp("limit")) || 200));
       if (method === "POST" && b === "key") return json(await capi.newApiKey());
       if (method === "DELETE" && b === "key") return json(await capi.removeApiKey());
+      if (method === "DELETE" && b === "logs") return json(await capi.clearApiLogs());
     }
     if (a === "reader" && b === "speed" && method === "GET") return json(await (await import("./private-reader.server")).readerSpeed());
     if (a === "reader" && b === "status" && method === "GET") return json({ ...(await (await import("./private-reader.server")).readerStatus()), has_login: !!(await core.getSettings()).tg_session });
